@@ -233,16 +233,36 @@ function concludeFlightAt(cx,cy,dx,dy){
 }
 
 /* ---------- INPUT ---------- */
-window.addEventListener('keydown',(e)=>{
-  const key=e.key.toLowerCase();
-  if(key==='r'){ e.preventDefault(); resetToSaved(); return; }
-  if(key===' ' || key==='spacebar'){ e.preventDefault(); doUndo(); return; }
-  if(editMode) return;
-  let dx=0,dy=0;
-  if(key==='w') dy=-1; else if(key==='s') dy=1; else if(key==='a') dx=-1; else if(key==='d') dx=1; else return;
-  e.preventDefault();
-  attemptMove(dx,dy);
+canvas.addEventListener('mousedown', (e)=>{
+  if(!buildMode || !editMode) return;
+  mouseDown = true;
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left)/tileSize);
+  const y = Math.floor((e.clientY - rect.top)/tileSize);
+  if(!inBounds(x,y)) return;
+  
+  // Place player or box on click
+  if(selectedTool==='player'){ player={mode:'free',x,y}; if(base[y][x]==='empty') base[y][x]='floor'; }
+  else if(selectedTool==='box'){ addBox(x,y); if(base[y][x]==='empty') base[y][x]='floor'; }
+  else { base[y][x]=selectedTool; } // wall/floor/hole/exit
+  draw();
 });
+
+canvas.addEventListener('mousemove', (e)=>{
+  if(!mouseDown || !buildMode || !editMode) return;
+  // Only paint wall/floor/hole/exit while dragging
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left)/tileSize);
+  const y = Math.floor((e.clientY - rect.top)/tileSize);
+  if(!inBounds(x,y)) return;
+  if(['wall','floor','hole','exit'].includes(selectedTool)){
+    base[y][x]=selectedTool;
+    draw();
+  }
+});
+
+canvas.addEventListener('mouseup', ()=>{ mouseDown=false; });
+canvas.addEventListener('mouseleave', ()=>{ mouseDown=false; });
 
 /* ---------- INIT ---------- */
 draw();
