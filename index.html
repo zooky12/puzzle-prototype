@@ -262,7 +262,7 @@ async function refreshLevelsFolderList(){
   const sel = document.getElementById('server-levels');
   sel.innerHTML = '';
   try {
-    const res = await fetch('/levels/index.json', { cache: "no-store" });
+    const res = await fetch('levels/index.json', { cache: "no-store" });
     if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
     const list = await res.json();
     if(!Array.isArray(list)) throw new Error('index.json must be an array of filenames');
