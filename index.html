@@ -20,6 +20,14 @@ small.hint { color:#666; display:block; margin-top:6px; }
 <div class="toolbar">
     <div>
         <button id="build-mode-btn">Toggle Build Mode</button>
+        <!-- Levels chooser (paste into the toolbar so you can pick levels from /levels/) -->
+<div style="margin-top:6px;">
+  <label for="server-levels" style="font-size:12px;margin-right:6px;">Levels:</label>
+  <select id="server-levels" style="min-width:220px;"></select>
+  <button id="refresh-server">Refresh</button>
+  <button id="load-server">Load</button>
+</div>
+
     </div>
   <div class="build-controls">
     <div>
@@ -53,7 +61,7 @@ small.hint { color:#666; display:block; margin-top:6px; }
   </small>
 </div>
 
-<div class="status" id="status">Build Mode: ON</div>
+<div class="status" id="status">Build Mode: OFF</div>
 
 <script>
 /* ---------- CONFIG ---------- */
@@ -100,7 +108,7 @@ const blockBgColor = {
 let base = Array.from({length: rows}, ()=> Array.from({length: cols}, ()=> 'floor'));
 let boxes = [];
 let player = null;
-let buildMode = true;
+let buildMode = false;
 let selectedTool = 'wall';
 let savedSnapshot = null;
 let undoStack = [];
@@ -295,12 +303,12 @@ document.getElementById('load-server').addEventListener('click', async ()=>{
     player = JSON.parse(JSON.stringify(data.player));
     savedSnapshot = cloneState();
     undoStack = [ cloneState() ];
-    buildMode = true;
+    //buildMode = true;
     updateToolbarVisibility();
     draw();
-    alert('Loaded level from levels/' + name);
+    //alert('Loaded level from levels/' + name);
   } catch(err){
-    alert('Failed to load levels/' + name + ': ' + err.message);
+    //alert('Failed to load levels/' + name + ': ' + err.message);
   }
 });
 
