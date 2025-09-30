@@ -223,7 +223,7 @@ document.getElementById('clear-btn').addEventListener('click', ()=>{ base = Arra
 /* Reset & Undo */
 function resetToSaved(){ if(!savedSnapshot) return; restoreState(savedSnapshot); undoStack = [ cloneState() ]; }
 document.getElementById('reset-btn').addEventListener('click', resetToSaved);
-function doUndo(){ if(undoStack.length <= 1) return; undoStack.pop(); const prev = undoStack[undoStack.length - 1]; restoreState(prev); }
+function doUndo(){ if(undoStack.length <= 1) return;  const prev = undoStack[undoStack.length - 1]; restoreState(prev); undoStack.pop();}
 document.getElementById('undo-btn').addEventListener('click', doUndo);
 
 /* ---------- JSON Export/Import (local download) ---------- */
