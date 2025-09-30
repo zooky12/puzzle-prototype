@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>Box-Enter Puzzle Prototype — GitHub Pages Ready</title>
+<title>Box-Enter Puzzle Prototype — Build Mode & Drag Painting</title>
 <style>
 body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; padding:12px; }
 #game { border:1px solid #222; image-rendering: pixelated; display:block; margin-bottom:12px;}
@@ -13,7 +13,7 @@ small.hint { color:#666; display:block; margin-top:6px; }
 </style>
 </head>
 <body>
-<h3>Box-Enter Puzzle Prototype — GitHub Pages Ready</h3>
+<h3>Box-Enter Puzzle Prototype — Build Mode & Drag Painting</h3>
 <canvas id="game" width="480" height="480"></canvas>
 
 <div class="toolbar">
@@ -25,6 +25,7 @@ small.hint { color:#666; display:block; margin-top:6px; }
     <button data-tile="box">Box</button>
     <button data-tile="player">Player</button>
     <button id="fill-floor">Fill Floor</button>
+    <button id="build-mode-btn">Toggle Build Mode</button>
   </div>
   <div style="margin-top:6px;">
     <button id="play-btn">Play</button>
@@ -36,11 +37,11 @@ small.hint { color:#666; display:block; margin-top:6px; }
     <input type="file" id="import-file" style="display:none"/>
   </div>
   <small class="hint">
-    Draw map in EDIT mode. Click Play to start. WASD to move. SPACE = undo, R = reset. Export/Import levels via JSON.
+    Draw map in BUILD MODE. Click Play to start. WASD to move. SPACE = undo, R = reset. Drag to paint tiles (wall/floor/hole/exit). Export/Import levels via JSON.
   </small>
 </div>
 
-<div class="status" id="status">Mode: EDIT</div>
+<div class="status" id="status">Mode: EDIT, Build Mode: OFF</div>
 
 <script>
 /* ---------- CONFIG ---------- */
@@ -52,9 +53,9 @@ const tileSize = Math.floor(canvas.width / cols);
 
 const colors = {
   empty: '#ffffff',
-  wall: '#555555',
-  floor: '#111111',
-  hole: '#1e90ff',
+  wall: '#555555',     // dark grey
+  floor: '#dfe6e9',
+  hole: '#000000',     // black
   exit: '#3cb371',
   box: '#f39c12',
   player: '#e74c3c'
@@ -65,9 +66,11 @@ let base = createEmptyGrid();
 let boxes = [];
 let player = null;
 let editMode = true;
+let buildMode = false;
 let selectedTool = 'wall';
 let savedSnapshot = null;
 let undoStack = [];
+let mouseDown = false;
 
 /* ---------- HELPERS ---------- */
 function createEmptyGrid(){ return Array.from({length: rows},()=>Array.from({length:cols},()=> 'empty')); }
@@ -85,22 +88,33 @@ document.querySelectorAll('.toolbar button[data-tile]').forEach(b=>{
 });
 document.querySelector('.toolbar button[data-tile="wall"]').style.outline='2px solid #888';
 
-canvas.addEventListener('click', (e)=>{
-  if(!editMode) return;
+document.getElementById('build-mode-btn').addEventListener('click', ()=>{
+  buildMode = !buildMode;
+  document.getElementById('status').textContent=`Mode: ${editMode?'EDIT':'PLAY'}, Build Mode: ${buildMode?'ON':'OFF'}`;
+});
+
+canvas.addEventListener('mousedown', (e)=>{
+  if(!buildMode || !editMode) return;
+  mouseDown = true;
+  paintTileFromEvent(e);
+});
+canvas.addEventListener('mousemove', (e)=>{
+  if(mouseDown && buildMode && editMode) paintTileFromEvent(e);
+});
+canvas.addEventListener('mouseup', ()=>{ mouseDown=false; });
+canvas.addEventListener('mouseleave', ()=>{ mouseDown=false; });
+
+function paintTileFromEvent(e){
   const rect = canvas.getBoundingClientRect();
   const x = Math.floor((e.clientX - rect.left)/tileSize);
   const y = Math.floor((e.clientY - rect.top)/tileSize);
   if(!inBounds(x,y)) return;
-
-  if(selectedTool === 'box'){ addBox(x,y); if(base[y][x]==='empty') base[y][x]='floor'; }
-  else if(selectedTool === 'player'){ player={mode:'free',x,y}; if(base[y][x]==='empty') base[y][x]='floor'; }
-  else { base[y][x]=selectedTool; }
-  draw();
-});
+  if(['wall','floor','hole','exit'].includes(selectedTool)){ base[y][x]=selectedTool; draw(); }
+}
 
 document.getElementById('fill-floor').addEventListener('click', ()=>{ for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) base[y][x]='floor'; draw(); });
 document.getElementById('clear-btn').addEventListener('click', ()=>{
-  base = createEmptyGrid(); boxes = []; player = null; savedSnapshot = null; undoStack = []; editMode = true; document.getElementById('status').textContent='Mode: EDIT'; draw();
+  base = createEmptyGrid(); boxes = []; player = null; savedSnapshot = null; undoStack = []; editMode=true; buildMode=false; document.getElementById('status').textContent='Mode: EDIT, Build Mode: OFF'; draw();
 });
 
 document.getElementById('play-btn').addEventListener('click', ()=>{
@@ -108,11 +122,11 @@ document.getElementById('play-btn').addEventListener('click', ()=>{
   savedSnapshot = cloneState();
   undoStack = [ cloneState() ];
   editMode = false;
-  document.getElementById('status').textContent='Mode: PLAY';
+  document.getElementById('status').textContent=`Mode: PLAY, Build Mode: ${buildMode?'ON':'OFF'}`;
   draw();
 });
 
-function resetToSaved(){ if(savedSnapshot){ restoreState(savedSnapshot); undoStack=[cloneState()]; editMode=true; document.getElementById('status').textContent='Mode: EDIT'; draw(); } }
+function resetToSaved(){ if(savedSnapshot){ restoreState(savedSnapshot); undoStack=[cloneState()]; draw(); } }
 document.getElementById('reset-btn').addEventListener('click', resetToSaved);
 document.getElementById('undo-btn').addEventListener('click', doUndo);
 
@@ -137,8 +151,6 @@ document.getElementById('import-file').addEventListener('change', (e)=>{
       player = JSON.parse(JSON.stringify(data.player));
       savedSnapshot = cloneState();
       undoStack = [ cloneState() ];
-      editMode = true;
-      document.getElementById('status').textContent='Mode: EDIT';
       draw();
       alert('Level imported successfully');
     } catch(err){ alert('Failed to import JSON: '+err); }
@@ -177,7 +189,7 @@ function draw(){
 
 /* ---------- GAME LOGIC ---------- */
 function pushSnapshot(){ undoStack.push(cloneState()); }
-function doUndo(){ if(editMode) return; if(undoStack.length<=1) return; undoStack.pop(); restoreState(undoStack[undoStack.length-1]); draw(); }
+function doUndo(){ if(undoStack.length<=1) return; undoStack.pop(); restoreState(undoStack[undoStack.length-1]); draw(); }
 
 function attemptMove(dx,dy){
   if(editMode || !player) return;
@@ -187,8 +199,8 @@ function attemptMove(dx,dy){
     const targetBox=boxAt(nx,ny);
     if(targetBox){ pushSnapshot(); player={mode:'inbox',x:nx,y:ny,entryDir:{dx,dy}}; draw(); return; }
     pushSnapshot(); player.x=nx; player.y=ny;
-    if(base[ny][nx]==='hole'){ draw(); setTimeout(()=>{ alert('Game Over — fell into hole'); resetToSaved(); },10); return; }
-    if(base[ny][nx]==='exit'){ draw(); setTimeout(()=>{ alert('You Win! (free on exit)'); resetToSaved(); },10); return; }
+    if(base[ny][nx]==='hole'){ draw(); setTimeout(()=>{ alert('Game Over — fell into hole'); },10); return; }
+    if(base[ny][nx]==='exit'){ draw(); setTimeout(()=>{ alert('You Win! (free on exit)'); },10); return; }
     draw(); return;
   } else if(player.mode==='inbox'){
     const fromX=player.x,fromY=player.y,tx=fromX+dx,ty=fromY+dy;
@@ -196,9 +208,9 @@ function attemptMove(dx,dy){
     if(dx===-player.entryDir.dx && dy===-player.entryDir.dy){ pushSnapshot(); performFlight(dx,dy); return; }
     const other=boxAt(tx,ty);
     if(other){ const bx2=tx+dx,by2=ty+dy; if(!inBounds(bx2,by2)||base[by2][bx2]==='wall'||boxAt(bx2,by2)) return; pushSnapshot();
-      if(base[by2][bx2]==='hole'){ removeBoxAt(tx,ty); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; if(base[player.y][player.x]==='hole'){ draw(); setTimeout(()=>{ alert('Game Over — your box fell into a hole'); resetToSaved(); },10); return; } draw(); return; }
+      if(base[by2][bx2]==='hole'){ removeBoxAt(tx,ty); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; if(base[player.y][player.x]==='hole'){ draw(); setTimeout(()=>{ alert('Game Over — your box fell into a hole'); },10); return; } draw(); return; }
       moveBox(tx,ty,bx2,by2); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; draw(); return;
-    } else { if(base[ty][tx]==='hole'){ pushSnapshot(); removeBoxAt(fromX,fromY); draw(); setTimeout(()=>{ alert('Game Over — your box fell into a hole'); resetToSaved(); },10); return; } pushSnapshot(); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; if(base[ty][tx]==='exit'){ draw(); setTimeout(()=>{ alert('You Win! (free on exit)'); resetToSaved(); },10); return; } draw(); return; }
+    } else { if(base[ty][tx]==='hole'){ pushSnapshot(); removeBoxAt(fromX,fromY); draw(); setTimeout(()=>{ alert('Game Over — your box fell into a hole'); },10); return; } pushSnapshot(); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; if(base[ty][tx]==='exit'){ draw(); setTimeout(()=>{ alert('You Win! (free on exit)'); },10); return; } draw(); return; }
   }
 }
 
@@ -216,8 +228,8 @@ function concludeFlightAt(cx,cy,dx,dy){
   const b=boxAt(cx,cy);
   if(b){ player={mode:'inbox',x:cx,y:cy,entryDir:{dx,dy}}; draw(); return; }
   player={mode:'free',x:cx,y:cy}; draw();
-  if(base[cy][cx]==='hole'){ setTimeout(()=>{ alert('Game Over — fell into hole'); resetToSaved(); },10); return; }
-  if(base[cy][cx]==='exit'){ setTimeout(()=>{ alert('You Win! (free on exit)'); resetToSaved(); },10); return; }
+  if(base[cy][cx]==='hole'){ setTimeout(()=>{ alert('Game Over — fell into hole'); },10); return; }
+  if(base[cy][cx]==='exit'){ setTimeout(()=>{ alert('You Win! (free on exit)'); },10); return; }
 }
 
 /* ---------- INPUT ---------- */
