@@ -256,7 +256,7 @@ document.getElementById('import-file').addEventListener('change', (e)=>{
 });
 
 /* ---------- LEVELS FOLDER (static in repo) ---------- */
-/* Instead of server API, load from /levels/index.json (keep index.json updated in git) */
+/* Instead of server API, load from levels/index.json (keep index.json updated in git) */
 
 async function refreshLevelsFolderList(){
   const sel = document.getElementById('server-levels');
@@ -279,7 +279,7 @@ async function refreshLevelsFolderList(){
       sel.appendChild(opt);
     }
   } catch(err){
-    console.warn('Could not load /levels/index.json:', err);
+    console.warn('Could not load levels/index.json:', err);
     const opt = document.createElement('option');
     opt.value = '';
     opt.textContent = '(levels/index.json not found)';
@@ -294,7 +294,7 @@ document.getElementById('load-server').addEventListener('click', async ()=>{
   const name = sel.value;
   if(!name) return alert('Select a level first (refresh list if needed)');
   try {
-    const res = await fetch('/levels/' + encodeURIComponent(name), { cache: "no-store" });
+    const res = await fetch('levels/' + encodeURIComponent(name), { cache: "no-store" });
     if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
     const data = await res.json();
     if(!data.base || !data.boxes || !('player' in data)) throw new Error('Invalid level format');
