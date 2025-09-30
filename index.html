@@ -247,36 +247,49 @@ document.getElementById('import-file').addEventListener('change', (e)=>{
   reader.readAsText(file); e.target.value='';
 });
 
-/* ---------- SERVER INTERACTION (levels folder) ---------- */
-const serverBase = '/api/levels'; // endpoints: GET /api/levels  , GET/POST /api/levels/:name
-async function refreshServerList(){
-  try{
-    const res = await fetch(serverBase);
-    if(!res.ok) throw new Error(res.statusText);
-    const list = await res.json(); // array of filenames
-    const sel = document.getElementById('server-levels');
-    sel.innerHTML = '';
+/* ---------- LEVELS FOLDER (static in repo) ---------- */
+/* Instead of server API, load from /levels/index.json (keep index.json updated in git) */
+
+async function refreshLevelsFolderList(){
+  const sel = document.getElementById('server-levels');
+  sel.innerHTML = '';
+  try {
+    const res = await fetch('/levels/index.json', { cache: "no-store" });
+    if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    const list = await res.json();
+    if(!Array.isArray(list)) throw new Error('index.json must be an array of filenames');
     list.forEach(name => {
       const opt = document.createElement('option');
       opt.value = name;
       opt.textContent = name;
       sel.appendChild(opt);
     });
-  }catch(err){
-    console.warn('Could not fetch server levels:', err);
-    const sel = document.getElementById('server-levels');
-    sel.innerHTML = '<option value="">(server unreachable)</option>';
+    if(list.length === 0){
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(no levels found)';
+      sel.appendChild(opt);
+    }
+  } catch(err){
+    console.warn('Could not load /levels/index.json:', err);
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(levels/index.json not found)';
+    sel.appendChild(opt);
   }
 }
-document.getElementById('refresh-server').addEventListener('click', refreshServerList);
+
+document.getElementById('refresh-server').addEventListener('click', refreshLevelsFolderList);
 
 document.getElementById('load-server').addEventListener('click', async ()=>{
-  const sel = document.getElementById('server-levels'); const name = sel.value;
-  if(!name) return alert('Select a server level first');
-  try{
-    const res = await fetch(`${serverBase}/${encodeURIComponent(name)}`);
-    if(!res.ok) throw new Error(await res.text());
+  const sel = document.getElementById('server-levels');
+  const name = sel.value;
+  if(!name) return alert('Select a level first (refresh list if needed)');
+  try {
+    const res = await fetch('/levels/' + encodeURIComponent(name), { cache: "no-store" });
+    if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
     const data = await res.json();
+    if(!data.base || !data.boxes || !('player' in data)) throw new Error('Invalid level format');
     base = data.base.map(r=>r.slice());
     boxes = data.boxes.map(b=>({x:b.x,y:b.y}));
     player = JSON.parse(JSON.stringify(data.player));
@@ -285,31 +298,22 @@ document.getElementById('load-server').addEventListener('click', async ()=>{
     buildMode = true;
     updateToolbarVisibility();
     draw();
-    alert('Loaded level from server: ' + name);
-  }catch(err){ alert('Failed to load: ' + err.message); }
+    alert('Loaded level from levels/' + name);
+  } catch(err){
+    alert('Failed to load levels/' + name + ': ' + err.message);
+  }
 });
 
-document.getElementById('save-server').addEventListener('click', async ()=>{
-  // request filename
-  let name = prompt('Enter level name (no extension):', `level-${Date.now()}`);
-  if(!name) return;
-  if(!/^[a-zA-Z0-9\-_]+$/.test(name)) { alert('Use only letters, numbers, - or _'); return; }
-  const filename = name + '.json';
-  const payload = { base, boxes, player };
-  try{
-    const res = await fetch(`${serverBase}/${encodeURIComponent(filename)}`, {
-      method:'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-    if(!res.ok) throw new Error(await res.text());
-    alert('Saved to server as ' + filename);
-    refreshServerList();
-  }catch(err){ alert('Failed to save to server: ' + err.message); }
-});
+/* Disable Save button (editing repo must be done via git). */
+const saveBtn = document.getElementById('save-server');
+if(saveBtn){
+  saveBtn.disabled = true;
+  saveBtn.title = 'Saving is disabled. Add levels to the repo levels/ folder and update levels/index.json';
+}
 
-/* on load attempt to populate server list (best-effort) */
-refreshServerList();
+// populate on start
+refreshLevelsFolderList();
+
 
 /* ---------- DRAW (improved icons) ---------- */
 function drawOverlayForType(t, x, y){
