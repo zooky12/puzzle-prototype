@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Box-Enter Puzzle Prototype — GitHub Pages Ready</title>
+<style>
+body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; padding:12px; }
+#game { border:1px solid #222; image-rendering: pixelated; display:block; margin-bottom:12px;}
+.toolbar { margin-bottom:6px; }
+.toolbar button { margin-right:6px; margin-bottom:6px; }
+.status { font-weight:600; margin-bottom:12px; }
+small.hint { color:#666; display:block; margin-top:6px; }
+</style>
+</head>
+<body>
+<h3>Box-Enter Puzzle Prototype — GitHub Pages Ready</h3>
+<canvas id="game" width="480" height="480"></canvas>
+
+<div class="toolbar">
+  <div>
+    <button data-tile="wall">Wall</button>
+    <button data-tile="floor">Floor</button>
+    <button data-tile="hole">Hole</button>
+    <button data-tile="exit">Exit</button>
+    <button data-tile="box">Box</button>
+    <button data-tile="player">Player</button>
+    <button id="fill-floor">Fill Floor</button>
+  </div>
+  <div style="margin-top:6px;">
+    <button id="play-btn">Play</button>
+    <button id="reset-btn">Reset (R)</button>
+    <button id="undo-btn">Undo (SPACE)</button>
+    <button id="clear-btn">Clear</button>
+    <button id="export-btn">Export JSON</button>
+    <button id="import-btn">Import JSON</button>
+    <input type="file" id="import-file" style="display:none"/>
+  </div>
+  <small class="hint">
+    Draw map in EDIT mode. Click Play to start. WASD to move. SPACE = undo, R = reset. Export/Import levels via JSON.
+  </small>
+</div>
+
+<div class="status" id="status">Mode: EDIT</div>
+
+<script>
+/* ---------- CONFIG ---------- */
+const rows = 12;
+const cols = 12;
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const tileSize = Math.floor(canvas.width / cols);
+
+const colors = {
+  empty: '#ffffff',
+  wall: '#222222',
+  floor: '#dfe6e9',
+  hole: '#1e90ff',
+  exit: '#3cb371',
+  box: '#f39c12',
+  player: '#e74c3c'
+};
+
+/* ---------- STATE ---------- */
+let base = createEmptyGrid();
+let boxes = [];
+let player = null;
+let editMode = true;
+let selectedTool = 'wall';
+let savedSnapshot = null;
+let undoStack = [];
+
+/* ---------- HELPERS ---------- */
+function createEmptyGrid(){ return Array.from({length: rows},()=>Array.from({length:cols},()=> 'empty')); }
+function cloneState(){ return { base: base.map(r=>r.slice()), boxes: boxes.map(b=>({x:b.x,y:b.y})), player: player? JSON.parse(JSON.stringify(player)):null }; }
+function restoreState(snap){ base = snap.base.map(r=>r.slice()); boxes = snap.boxes.map(b=>({x:b.x,y:b.y})); player = snap.player?JSON.parse(JSON.stringify(snap.player)):null; }
+function inBounds(x,y){ return x>=0 && x<cols && y>=0 && y<rows; }
+function boxAt(x,y){ return boxes.find(b=>b.x===x && b.y===y); }
+function removeBoxAt(x,y){ boxes = boxes.filter(b=>!(b.x===x && b.y===y)); }
+function addBox(x,y){ if(!boxAt(x,y)) boxes.push({x,y}); }
+function moveBox(fromX,fromY,toX,toY){ for(let b of boxes){ if(b.x===fromX && b.y===fromY){ b.x=toX; b.y=toY; return true; } } return false; }
+
+/* ---------- UI HANDLERS ---------- */
+document.querySelectorAll('.toolbar button[data-tile]').forEach(b=>{
+  b.addEventListener('click', ()=> { selectedTool = b.dataset.tile; document.querySelectorAll('.toolbar button').forEach(btn=>btn.style.outline=''); b.style.outline='2px solid #888'; });
+});
+document.querySelector('.toolbar button[data-tile="wall"]').style.outline='2px solid #888';
+
+canvas.addEventListener('click', (e)=>{
+  if(!editMode) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left)/tileSize);
+  const y = Math.floor((e.clientY - rect.top)/tileSize);
+  if(!inBounds(x,y)) return;
+
+  if(selectedTool === 'box'){ addBox(x,y); if(base[y][x]==='empty') base[y][x]='floor'; }
+  else if(selectedTool === 'player'){ player={mode:'free',x,y}; if(base[y][x]==='empty') base[y][x]='floor'; }
+  else { base[y][x]=selectedTool; }
+  draw();
+});
+
+document.getElementById('fill-floor').addEventListener('click', ()=>{ for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) base[y][x]='floor'; draw(); });
+document.getElementById('clear-btn').addEventListener('click', ()=>{
+  base = createEmptyGrid(); boxes = []; player = null; savedSnapshot = null; undoStack = []; editMode = true; document.getElementById('status').textContent='Mode: EDIT'; draw();
+});
+
+document.getElementById('play-btn').addEventListener('click', ()=>{
+  if(!player){ alert('Place a player first'); return; }
+  savedSnapshot = cloneState();
+  undoStack = [ cloneState() ];
+  editMode = false;
+  document.getElementById('status').textContent='Mode: PLAY';
+  draw();
+});
+
+function resetToSaved(){ if(savedSnapshot){ restoreState(savedSnapshot); undoStack=[cloneState()]; editMode=true; document.getElementById('status').textContent='Mode: EDIT'; draw(); } }
+document.getElementById('reset-btn').addEventListener('click', resetToSaved);
+document.getElementById('undo-btn').addEventListener('click', doUndo);
+
+/* ---------- JSON EXPORT / IMPORT ---------- */
+document.getElementById('export-btn').addEventListener('click', ()=>{
+  if(!player){ alert('Place a player first'); return; }
+  const levelData = { base, boxes, player };
+  const blob = new Blob([JSON.stringify(levelData, null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='level.json'; a.click(); URL.revokeObjectURL(url);
+});
+document.getElementById('import-btn').addEventListener('click', ()=> document.getElementById('import-file').click());
+document.getElementById('import-file').addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    try {
+      const data = JSON.parse(ev.target.result);
+      if(!data.base||!data.boxes||!data.player) throw "Invalid format";
+      base = data.base.map(r=>r.slice());
+      boxes = data.boxes.map(b=>({x:b.x,y:b.y}));
+      player = JSON.parse(JSON.stringify(data.player));
+      savedSnapshot = cloneState();
+      undoStack = [ cloneState() ];
+      editMode = true;
+      document.getElementById('status').textContent='Mode: EDIT';
+      draw();
+      alert('Level imported successfully');
+    } catch(err){ alert('Failed to import JSON: '+err); }
+  };
+  reader.readAsText(file); e.target.value='';
+});
+
+/* ---------- DRAW ---------- */
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const t=base[y][x]||'empty';
+      ctx.fillStyle=colors[t]||colors.empty;
+      ctx.fillRect(x*tileSize,y*tileSize,tileSize,tileSize);
+      ctx.strokeStyle='#ddd';
+      ctx.strokeRect(x*tileSize,y*tileSize,tileSize,tileSize);
+    }
+  }
+  for(const b of boxes){ if(player && player.mode==='inbox' && player.x===b.x && player.y===b.y) continue; ctx.fillStyle=colors.box; ctx.fillRect(b.x*tileSize+4,b.y*tileSize+4,tileSize-8,tileSize-8); }
+  if(player){
+    if(player.mode==='free'){ ctx.fillStyle=colors.player; const cx=player.x*tileSize+tileSize/2; const cy=player.y*tileSize+tileSize/2; ctx.beginPath(); ctx.arc(cx,cy,tileSize*0.32,0,Math.PI*2); ctx.fill(); }
+    if(player.mode==='inbox'){
+      const bx=player.x,by=player.y,dx=player.entryDir.dx,dy=player.entryDir.dy;
+      ctx.fillStyle=colors.box; ctx.fillRect(bx*tileSize+4,by*tileSize+4,tileSize-8,tileSize-8);
+      ctx.save(); ctx.fillStyle=colors.player;
+      if(dx===1) ctx.fillRect(bx*tileSize+4,by*tileSize+4,(tileSize-8)/2,tileSize-8);
+      else if(dx===-1) ctx.fillRect(bx*tileSize+4+(tileSize-8)/2,by*tileSize+4,(tileSize-8)/2,tileSize-8);
+      else if(dy===1) ctx.fillRect(bx*tileSize+4,by*tileSize+4,tileSize-8,(tileSize-8)/2);
+      else if(dy===-1) ctx.fillRect(bx*tileSize+4,by*tileSize+4+(tileSize-8)/2,tileSize-8,(tileSize-8)/2);
+      else { const r=tileSize*0.32; ctx.beginPath(); ctx.arc(bx*tileSize+tileSize/2,by*tileSize+tileSize/2,r,0,Math.PI*2); ctx.fill(); }
+      ctx.restore(); ctx.strokeStyle='#333'; ctx.strokeRect(bx*tileSize+4,by*tileSize+4,tileSize-8,tileSize-8);
+    }
+  }
+}
+
+/* ---------- GAME LOGIC ---------- */
+function pushSnapshot(){ undoStack.push(cloneState()); }
+function doUndo(){ if(editMode) return; if(undoStack.length<=1) return; undoStack.pop(); restoreState(undoStack[undoStack.length-1]); draw(); }
+
+function attemptMove(dx,dy){
+  if(editMode || !player) return;
+  if(player.mode==='free'){
+    const nx=player.x+dx,ny=player.y+dy;
+    if(!inBounds(nx,ny)||base[ny][nx]==='wall') return;
+    const targetBox=boxAt(nx,ny);
+    if(targetBox){ pushSnapshot(); player={mode:'inbox',x:nx,y:ny,entryDir:{dx,dy}}; draw(); return; }
+    pushSnapshot(); player.x=nx; player.y=ny;
+    if(base[ny][nx]==='hole'){ draw(); setTimeout(()=>{ alert('Game Over — fell into hole'); resetToSaved(); },10); return; }
+    if(base[ny][nx]==='exit'){ draw(); setTimeout(()=>{ alert('You Win! (free on exit)'); resetToSaved(); },10); return; }
+    draw(); return;
+  } else if(player.mode==='inbox'){
+    const fromX=player.x,fromY=player.y,tx=fromX+dx,ty=fromY+dy;
+    if(!inBounds(tx,ty)||base[ty][tx]==='wall') return;
+    if(dx===-player.entryDir.dx && dy===-player.entryDir.dy){ pushSnapshot(); performFlight(dx,dy); return; }
+    const other=boxAt(tx,ty);
+    if(other){ const bx2=tx+dx,by2=ty+dy; if(!inBounds(bx2,by2)||base[by2][bx2]==='wall'||boxAt(bx2,by2)) return; pushSnapshot();
+      if(base[by2][bx2]==='hole'){ removeBoxAt(tx,ty); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; if(base[player.y][player.x]==='hole'){ draw(); setTimeout(()=>{ alert('Game Over — your box fell into a hole'); resetToSaved(); },10); return; } draw(); return; }
+      moveBox(tx,ty,bx2,by2); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; draw(); return;
+    } else { if(base[ty][tx]==='hole'){ pushSnapshot(); removeBoxAt(fromX,fromY); draw(); setTimeout(()=>{ alert('Game Over — your box fell into a hole'); resetToSaved(); },10); return; } pushSnapshot(); moveBox(fromX,fromY,tx,ty); player.x=tx; player.y=ty; if(base[ty][tx]==='exit'){ draw(); setTimeout(()=>{ alert('You Win! (free on exit)'); resetToSaved(); },10); return; } draw(); return; }
+  }
+}
+
+function performFlight(dx,dy){
+  let cx=player.x,cy=player.y;
+  while(true){
+    const nx=cx+dx,ny=cy+dy;
+    if(!inBounds(nx,ny)||base[ny][nx]==='wall'){ concludeFlightAt(cx,cy,dx,dy); return; }
+    const bx=boxAt(nx,ny);
+    if(bx){ player={mode:'inbox',x:nx,y:ny,entryDir:{dx,dy}}; draw(); return; }
+    cx=nx; cy=ny;
+  }
+}
+function concludeFlightAt(cx,cy,dx,dy){
+  const b=boxAt(cx,cy);
+  if(b){ player={mode:'inbox',x:cx,y:cy,entryDir:{dx,dy}}; draw(); return; }
+  player={mode:'free',x:cx,y:cy}; draw();
+  if(base[cy][cx]==='hole'){ setTimeout(()=>{ alert('Game Over — fell into hole'); resetToSaved(); },10); return; }
+  if(base[cy][cx]==='exit'){ setTimeout(()=>{ alert('You Win! (free on exit)'); resetToSaved(); },10); return; }
+}
+
+/* ---------- INPUT ---------- */
+window.addEventListener('keydown',(e)=>{
+  const key=e.key.toLowerCase();
+  if(key==='r'){ e.preventDefault(); resetToSaved(); return; }
+  if(key===' ' || key==='spacebar'){ e.preventDefault(); doUndo(); return; }
+  if(editMode) return;
+  let dx=0,dy=0;
+  if(key==='w') dy=-1; else if(key==='s') dy=1; else if(key==='a') dx=-1; else if(key==='d') dx=1; else return;
+  e.preventDefault();
+  attemptMove(dx,dy);
+});
+
+/* ---------- INIT ---------- */
+draw();
+</script>
+</body>
+</html>
