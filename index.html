@@ -16,6 +16,7 @@ small.hint { color:#666; display:block; margin-top:6px; }
 <body>
 <h3>Box-Enter Puzzle Prototype — Server Levels & Cleaner Icons</h3>
 <canvas id="game" width="480" height="480"></canvas>
+<div id="bigMessage" style="font-size:26px;font-weight:800;text-align:center;margin-top:12px;min-height:34px;"></div>
 
 <div class="toolbar">
     <div>
@@ -31,16 +32,24 @@ small.hint { color:#666; display:block; margin-top:6px; }
     </div>
   <div class="build-controls">
     <div>
-    <!-- kept buttons for familiarity - includes new block types -->
-    <button data-tile="wall">Wall</button>
-    <button data-tile="floor">Floor</button>
-    <button data-tile="hole">Hole</button>
-    <button data-tile="exit">Exit</button>
-    <button data-tile="spikes">Spikes</button>
-    <button data-tile="grile">Grile</button>
-    <button data-tile="pressurePlate">Pressure Plate</button>
-    <button data-tile="box">Box</button>
-    <button data-tile="player">Player</button>
+      <div>
+        <button data-tile="wall">Wall</button>
+        <button data-tile="floor">Floor</button>
+        <button data-tile="hole">Hole</button>
+        <button data-tile="exit">Exit</button>
+      </div>
+      <div>
+        <button data-tile="spikes">Spikes</button>
+        <button data-tile="grile">Grile</button>
+        <button data-tile="pressurePlate">Pressure Plate</button>
+        <button data-tile="holeSpikes">Hole Spikes</button>
+        <button data-tile="slimPathFloor">Slim Path Floor</button>
+        <button data-tile="slimPathHole">Slim Path Hole</button>
+      </div>
+      <div>
+        <button data-tile="box">Box</button>
+        <button data-tile="player">Player</button>
+      </div>
     </div>
     <div>
     <button id="export-btn">Export JSON</button>
@@ -74,8 +83,8 @@ const tileSize = Math.floor(canvas.width / cols);
 /* visual colors */
 const colors = {
   empty: '#ffffff',
-  wall: '#555555',     // dark grey
-  floor: '#dfe6e9',
+  wall: '#777777',     // dark grey
+  floor: '#fafafa',
   hole: '#000000',     // black
   exitActive: '#3cb371',
   exitInactive: '#bfecc4', // pale green
@@ -91,7 +100,10 @@ const BlockTypes = {
   exit: { isEnd:true },
   spikes: { isWallForBox:true, isStickOnFly:true },
   grile: { isHoleForPlayer:true, isHoleForBox:false },
-  pressurePlate: { requiresBox:true }
+  pressurePlate: { requiresBox:true },
+  holeSpikes: { isWallForBox:true, isStickOnFly:true, isHoleForPlayer:true },
+  slimPathFloor: { isWallForBox:true },
+  slimPathHole: { isWallForBox:true, isHoleForPlayer:true }
 };
 
 const blockBgColor = {
@@ -101,7 +113,11 @@ const blockBgColor = {
   exit: colors.exitActive,
   spikes: colors.floor,
   grile: colors.hole,
-  pressurePlate: colors.floor
+  pressurePlate: colors.floor,
+  holeSpikes: colors.hole,        // hole background with spike overlay
+  slimPathFloor: colors.floor,    // floor bg
+  slimPathHole: colors.hole       // hole bg for the hole variant
+
 };
 
 /* ---------- STATE ---------- */
@@ -113,6 +129,87 @@ let selectedTool = 'wall';
 let savedSnapshot = null;
 let undoStack = [];
 let mouseDown = false;
+let gameState = null;
+// Falling-box visual animations (independent of internal logic)
+let fallingAnims = []; // { x, y, start, duration }
+let animRunning = false;
+
+function animateBoxFall(x, y, duration = 1000){
+  // x,y are grid coords (integers)
+  fallingAnims.push({ x, y, start: performance.now(), duration });
+  startAnimLoop();
+}
+
+function startAnimLoop(){
+  if(animRunning) return;
+  animRunning = true;
+  requestAnimationFrame(animLoop);
+}
+
+function animLoop(ts){
+  // call the normal draw which paints the current game state
+  draw();
+  // then paint the falling animations on top
+  drawFallingAnims(performance.now());
+  if(fallingAnims.length > 0){
+    requestAnimationFrame(animLoop);
+  } else {
+    animRunning = false;
+  }
+}
+
+function drawFallingAnims(now){
+  // draw overlay animations for boxes that just "fell into holes"
+  // each anim shrinks and darkens over its duration, then is removed
+  if(!fallingAnims.length) return;
+  // iterate a copy because we may remove while iterating
+  const next = [];
+  for(const a of fallingAnims){
+    const t = now - a.start;
+    const p = Math.max(0, Math.min(1, t / a.duration)); // 0..1
+    if(p >= 1) {
+      // finished -> don't keep
+      continue;
+    }
+    // compute size and alpha: start ~ full size, end smaller and darker
+    const startSize = tileSize - 8;
+    const scale = 1 - 0.75 * p;        // shrink to 25% size
+    const size = Math.max(2, Math.floor(startSize * scale));
+    const cx = a.x * tileSize + tileSize/2;
+    const cy = a.y * tileSize + tileSize/2;
+    // alpha fades a bit (we also let hole background show through darker color)
+    const alpha = 1 - 0.7 * p;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // draw the box (centered)
+    ctx.fillStyle = colors.box;
+    ctx.fillRect(Math.round(cx - size/2), Math.round(cy - size/2), size, size);
+    // draw a subtle dark overlay to simulate it falling 'into' the hole
+    ctx.fillStyle = `rgba(0,0,0,${0.4 * p})`;
+    ctx.fillRect(Math.round(cx - size/2), Math.round(cy - size/2), size, size);
+    ctx.restore();
+
+    next.push(a);
+  }
+  fallingAnims = next;
+}
+
+
+function setGameState(state, message){
+  gameState = state; // state: 'win' or 'lose' or null
+  const el = document.getElementById('bigMessage');
+  if(!el) return;
+  if(state === 'win'){
+    el.textContent = message || 'You Win!';
+    el.style.color = 'green';
+  } else if(state === 'lose'){
+    el.textContent = message || 'You Lose';
+    el.style.color = 'crimson';
+  } else {
+    el.textContent = '';
+  }
+}
 
 /* ---------- HELPERS ---------- */
 function cloneState(){ return { base: base.map(r=>r.slice()), boxes: boxes.map(b=>({x:b.x,y:b.y})), player: player? JSON.parse(JSON.stringify(player)):null }; }
@@ -185,7 +282,7 @@ function handleBuildDrag(e){
   const x = Math.floor((e.clientX - rect.left)/tileSize);
   const y = Math.floor((e.clientY - rect.top)/tileSize);
   if(!inBounds(x,y)) return;
-  if(['wall','floor','hole','exit','spikes','grile','pressurePlate'].includes(selectedTool)){
+  if(['wall','floor','hole','exit','spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole'].includes(selectedTool)){
     base[y][x] = selectedTool;
     draw();
   }
@@ -218,12 +315,51 @@ window.addEventListener('keydown', (e)=>{
 
 /* ---------- UI buttons ---------- */
 document.getElementById('fill-floor').addEventListener('click', ()=>{ for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) base[y][x]='floor'; draw(); });
-document.getElementById('clear-btn').addEventListener('click', ()=>{ base = Array.from({length: rows}, ()=> Array.from({length: cols}, ()=> 'floor')); boxes = []; player = null; savedSnapshot = null; undoStack = []; buildMode=true; updateToolbarVisibility(); draw(); });
+document.getElementById('clear-btn').addEventListener('click', ()=>{
+  if(!confirm('Clear map? This will remove boxes, player and tiles. Proceed?')) return;
+  base = Array.from({length: rows}, ()=> Array.from({length: cols}, ()=> 'floor'));
+  boxes = []; player = null; savedSnapshot = null; undoStack = []; buildMode=true; updateToolbarVisibility(); draw();
+  setGameState(null);
+});
 
 /* Reset & Undo */
-function resetToSaved(){ if(!savedSnapshot) return; restoreState(savedSnapshot); undoStack = [ cloneState() ]; }
+function resetToSaved(){
+  if(!savedSnapshot) return;
+  restoreState(savedSnapshot);
+  undoStack = [ cloneState() ];
+  setGameState(null);
+}
+
 document.getElementById('reset-btn').addEventListener('click', resetToSaved);
-function doUndo(){ if(undoStack.length <= 1) return;  const prev = undoStack[undoStack.length - 1]; restoreState(prev); undoStack.pop();}
+function doUndo(){
+  if(undoStack.length <= 1) return;
+  undoStack.pop();
+  const prev = undoStack[undoStack.length - 1];
+  restoreState(prev);
+
+  // after restoring, check whether restored state is terminal; if not, clear any message
+  const snap = cloneState();
+  // check for lose: any box on hole OR player free on hole
+  let terminalLose = false;
+  for(let y=0;y<rows;y++) for(let x=0;x<cols;x++){
+    const t = snap.base[y][x] || 'floor';
+    if(attr(t, 'isHoleForBox') && snap.boxes.some(b=>b.x===x && b.y===y)){ terminalLose = true; }
+  }
+  if(snap.player){
+    if(snap.player.mode === 'free' && attr(snap.base[snap.player.y][snap.player.x],'isHoleForPlayer')) terminalLose = true;
+  }
+  if(terminalLose){ setGameState('lose','Game Over — your box fell into a hole'); return; }
+
+  // check for win (player free on active exit)
+  if(snap.player && snap.player.mode === 'free'){
+    const t = snap.base[snap.player.y][snap.player.x] || 'floor';
+    if(attr(t,'isEnd') && computeExitActive()){ setGameState('win','You Win!'); return; }
+  }
+
+  // otherwise clear message
+  setGameState(null);
+}
+
 document.getElementById('undo-btn').addEventListener('click', doUndo);
 
 /* ---------- JSON Export/Import (local download) ---------- */
@@ -293,6 +429,7 @@ document.getElementById('load-server').addEventListener('click', async ()=>{
   const sel = document.getElementById('server-levels');
   const name = sel.value;
   if(!name) return alert('Select a level first (refresh list if needed)');
+  if(!confirm('Load "' + name + '"? Unsaved changes will be lost.')) return;
   try {
     const res = await fetch('levels/' + encodeURIComponent(name), { cache: "no-store" });
     if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
@@ -330,7 +467,7 @@ function drawOverlayForType(t, x, y){
   ctx.translate(px, py);
   // set crisp line values based on tileSize
   const lw = Math.max(2, Math.floor(tileSize * 0.12));
-  if(t === 'spikes'){
+  if(t === 'spikes' || t === 'holeSpikes'){
     // draw 5 small triangles (sharp, crisp)
     const count = 5;
     const spacing = tileSize / (count + 1);
@@ -386,6 +523,20 @@ function drawOverlayForType(t, x, y){
     ctx.strokeStyle = 'rgba(0,0,0,0.08)';
     ctx.arc(tileSize/2, tileSize/2, tileSize*0.28, 0, Math.PI*2);
     ctx.stroke();
+  } else if(t === 'slimPathFloor' || t === 'slimPathHole'){
+    // draw dots on the edges of the square (4 edges x 3 dots each) in wall color
+    ctx.fillStyle = colors.wall;
+    const dotR = Math.max(1, Math.floor(tileSize * 0.06));
+    const margin = Math.max(2, Math.floor(tileSize * 0.02));
+    // top row
+    const colsCount = 2;
+    for(let i=0;i<colsCount;i++){
+      const xPos = margin + (tileSize - margin*2) * (i/(colsCount-1));
+      ctx.beginPath(); ctx.arc(xPos, margin, dotR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(xPos, tileSize - margin, dotR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(margin, margin + (tileSize - margin*2) * (i/(colsCount-1)), dotR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(tileSize - margin, margin + (tileSize - margin*2) * (i/(colsCount-1)), dotR, 0, Math.PI*2); ctx.fill();
+    }
   }
   ctx.restore();
 }
@@ -414,7 +565,7 @@ function draw(){
       ctx.strokeStyle = '#ddd';
       ctx.strokeRect(x*tileSize, y*tileSize, tileSize, tileSize);
 
-      if(['spikes','grile','pressurePlate'].includes(t)) drawOverlayForType(t, x, y);
+      if(['spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole'].includes(t)) drawOverlayForType(t, x, y);
     }
   }
 
@@ -455,7 +606,7 @@ function pushSnapshot(){ undoStack.push(cloneState()); }
 
 function attemptMove(dx,dy){
   if(buildMode || !player) return;
-
+  if(gameState) return;
   if(player.mode === 'free'){
     const nx = player.x + dx, ny = player.y + dy;
     if(!inBounds(nx, ny)) return;
@@ -472,11 +623,11 @@ function attemptMove(dx,dy){
     player.x = nx; player.y = ny;
     if(attr(targetType, 'isHoleForPlayer')){
       draw();
-      setTimeout(()=>{ alert('Game Over — fell into hole'); }, 10);
+      setGameState('lose', 'Game Over — fell into hole');
       return;
     }
     if(attr(targetType, 'isEnd')){
-      if(computeExitActive()){ draw(); setTimeout(()=>{ alert('You Win! (free on exit)'); }, 10); return; }
+      if(computeExitActive()){ draw(); setGameState('win', 'You Win!'); return; }
     }
     draw();
     return;
@@ -503,13 +654,27 @@ function attemptMove(dx,dy){
       if(attr(beyondType, 'isWallForBox') || boxAt(bx2,by2)) return;
       pushSnapshot();
       if(attr(beyondType, 'isHoleForBox')){
-        removeBoxAt(tx,ty);
-        moveBox(fromX,fromY,tx,ty);
-        player.x = tx; player.y = ty;
-        if(attr(base[player.y][player.x], 'isHoleForBox')){
-          draw(); setTimeout(()=>{ alert('Game Over — your box fell into a hole'); }, 10); return;
+        // remove the pushed box at its destination (bx2,by2) and animate it falling there
+        // note: the 'other' box was originally at tx,ty and would be moved to bx2,by2 then vanish.
+        // remove the 'other' from its original spot first
+        removeBoxAt(tx, ty);
+        // place player's box into tx,ty (visual move)
+        moveBox(fromX, fromY, tx, ty);
+
+        // animate the pushed box falling into the target hole (bx2,by2)
+        animateBoxFall(bx2, by2, 1000);
+
+        // if player's box ended up on a hole-for-box (rare), resolve it visually too:
+        if(attr(base[ty][tx], 'isHoleForBox')){
+          player = { mode: 'free', x: tx, y: ty };
+          draw();
+          setGameState('lose', 'Game Over — your box fell into a hole');
+          return;
         }
-        draw(); return;
+
+        player.x = tx; player.y = ty;
+        draw();
+        return;
       } else {
         moveBox(tx,ty,bx2,by2);
         moveBox(fromX,fromY,tx,ty);
@@ -517,15 +682,22 @@ function attemptMove(dx,dy){
         draw(); return;
       }
     } else {
+      // moving player's box into an empty tile (no other box)
       if(attr(targetType, 'isHoleForBox')){
         pushSnapshot();
-        removeBoxAt(fromX,fromY);
+        removeBoxAt(fromX, fromY);
+        // start the visual falling animation at the hole tile
+        animateBoxFall(tx, ty, 1000);
+        // player becomes free at the hole tile (and then loses)
+        player = { mode: 'free', x: tx, y: ty };
+        // draw will be called by anim loop (we call draw() once to update immediately)
         draw();
-        setTimeout(()=>{ alert('Game Over — your box fell into a hole'); }, 10);
+        setGameState('lose', 'Game Over — your box fell into a hole');
         return;
       }
+      // normal move: move player's box into the tile
       pushSnapshot();
-      moveBox(fromX,fromY,tx,ty);
+      moveBox(fromX, fromY, tx, ty);
       player.x = tx; player.y = ty;
       draw();
       return;
@@ -548,8 +720,8 @@ function performFlight(dx,dy){
       const bx = boxAt(nx, ny);
       if(bx){ player = { mode:'inbox', x:nx, y:ny, entryDir:{dx,dy} }; draw(); return; }
       else { player = { mode:'free', x:nx, y:ny }; draw();
-        if(attr(nextType, 'isHoleForPlayer')){ setTimeout(()=>{ alert('Game Over — fell into hole'); }, 10); return; }
-        if(attr(nextType, 'isEnd') && computeExitActive()){ setTimeout(()=>{ alert('You Win! (free on exit)'); }, 10); return; }
+        if(attr(nextType, 'isHoleForPlayer')){ setGameState('lose', 'Game Over — fell into hole'); return; }
+        if(attr(nextType, 'isEnd') && computeExitActive()){ setGameState('win','You Win!'); return; }
         return;
       }
     }
@@ -564,8 +736,8 @@ function concludeFlightAt(cx,cy,dx,dy){
   if(b){ player = { mode:'inbox', x:cx, y:cy, entryDir:{dx,dy} }; draw(); return; }
   player = { mode:'free', x:cx, y:cy }; draw();
   const t = base[cy][cx] || 'floor';
-  if(attr(t, 'isHoleForPlayer')){ setTimeout(()=>{ alert('Game Over — fell into hole'); }, 10); return; }
-  if(attr(t, 'isEnd') && computeExitActive()){ setTimeout(()=>{ alert('You Win! (free on exit)'); }, 10); return; }
+  if(attr(t, 'isHoleForPlayer')){ setGameState('lose', 'Game Over — fell into hole'); return; }
+  if(attr(t, 'isEnd') && computeExitActive()){ setGameState('win','You Win!'); return; }
 }
 
 /* ---------- INIT ---------- */
