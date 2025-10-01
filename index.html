@@ -41,6 +41,7 @@ small.hint { color:#666; display:block; margin-top:6px; }
       <div>
         <button data-tile="spikes">Spikes</button>
         <button data-tile="grile">Grile</button>
+        <button data-tile="fragileWall">Fragile Wall</button>
         <button data-tile="pressurePlate">Pressure Plate</button>
         <button data-tile="holeSpikes">Hole Spikes</button>
         <button data-tile="slimPathFloor">Slim Path Floor</button>
@@ -103,7 +104,8 @@ const BlockTypes = {
   pressurePlate: { requiresBox:true },
   holeSpikes: { isWallForBox:true, isStickOnFly:true, isHoleForPlayer:true },
   slimPathFloor: { isWallForBox:true },
-  slimPathHole: { isWallForBox:true, isHoleForPlayer:true }
+  slimPathHole: { isWallForBox:true, isHoleForPlayer:true },
+  fragileWall: { isFragile:true, isWallForPlayer:true, isWallForBox:true, isNotFly:true }
 };
 
 const blockBgColor = {
@@ -116,7 +118,8 @@ const blockBgColor = {
   pressurePlate: colors.floor,
   holeSpikes: colors.hole,        // hole background with spike overlay
   slimPathFloor: colors.floor,    // floor bg
-  slimPathHole: colors.hole       // hole bg for the hole variant
+  slimPathHole: colors.hole,       // hole bg for the hole variant
+  fragileWall: colors.wall
 
 };
 
@@ -282,7 +285,7 @@ function handleBuildDrag(e){
   const x = Math.floor((e.clientX - rect.left)/tileSize);
   const y = Math.floor((e.clientY - rect.top)/tileSize);
   if(!inBounds(x,y)) return;
-  if(['wall','floor','hole','exit','spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole'].includes(selectedTool)){
+  if(['wall','floor','hole','exit','spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole','fragileWall'].includes(selectedTool)){
     base[y][x] = selectedTool;
     draw();
   }
@@ -537,6 +540,42 @@ function drawOverlayForType(t, x, y){
       ctx.beginPath(); ctx.arc(margin, margin + (tileSize - margin*2) * (i/(colsCount-1)), dotR, 0, Math.PI*2); ctx.fill();
       ctx.beginPath(); ctx.arc(tileSize - margin, margin + (tileSize - margin*2) * (i/(colsCount-1)), dotR, 0, Math.PI*2); ctx.fill();
     }
+  } else if(t === 'fragileWall'){
+    // wall background already drawn; overlay a jagged crack line to indicate fragility
+    ctx.strokeStyle = '#222'; // dark line for crack
+    ctx.lineWidth = Math.max(2, Math.floor(tileSize * 0.08));
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'miter';
+
+    const inset = tileSize * 0.18;
+    // create a jagged polyline across the tile
+    const pts = [
+      {x: inset, y: tileSize*0.35},
+      {x: inset + tileSize*0.08, y: tileSize*0.45},
+      {x: inset + tileSize*0.18, y: tileSize*0.3},
+      {x: inset + tileSize*0.32, y: tileSize*0.5},
+      {x: inset + tileSize*0.5, y: tileSize*0.28},
+      {x: inset + tileSize*0.68, y: tileSize*0.6},
+      {x: tileSize - inset - tileSize*0.02, y: tileSize*0.35}
+    ];
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for(let i=1;i<pts.length;i++){
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
+    ctx.stroke();
+
+    // subtle highlight on one side of the crack
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = Math.max(1, Math.floor(tileSize * 0.03));
+    ctx.beginPath();
+    for(let i=0;i<pts.length;i++){
+      const p = pts[i];
+      // offset slightly along normal (simple y-offset for subtlety)
+      ctx.lineTo(p.x, p.y - Math.max(1, Math.floor(tileSize*0.02)));
+    }
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -564,8 +603,7 @@ function draw(){
       ctx.fillRect(x*tileSize, y*tileSize, tileSize, tileSize);
       ctx.strokeStyle = '#ddd';
       ctx.strokeRect(x*tileSize, y*tileSize, tileSize, tileSize);
-
-      if(['spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole'].includes(t)) drawOverlayForType(t, x, y);
+      if(['spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole','fragileWall'].includes(t)) drawOverlayForType(t, x, y);
     }
   }
 
@@ -713,6 +751,13 @@ function performFlight(dx,dy){
       concludeFlightAt(cx, cy, dx, dy); return;
     }
     const nextType = base[ny][nx] || 'floor';
+        // fragile tiles: if player flies into a fragile tile, it breaks (becomes floor)
+    if(attr(nextType, 'isFragile')){
+      base[ny][nx] = 'floor';
+      //player = { mode: 'free', x: nx, y: ny };
+      draw();
+      //return;
+    }
     if(attr(nextType, 'isNotFly')){
       concludeFlightAt(cx, cy, dx, dy); return;
     }
