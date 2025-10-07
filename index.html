@@ -12,10 +12,10 @@ body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neu
 small.hint { color:#666; display:block; margin-top:6px; }
 .hidden { display:none !important; }
 #solverPanel { border:1px solid #ccc; padding:8px; margin-top:8px; background:#fafafa; }
-.solutionItem { font-family: monospace; margin:4px 0; display:flex; gap:8px; align-items:center; }
-.solutionItem button { margin-left:auto; }
+.solutionItem { display:flex; font-family: monospace; margin:4px 0; display:flex; gap:8px; align-items:center; }
 #bigMessage { font-size:26px;font-weight:800;text-align:center;margin-top:12px;min-height:34px; }
 .progress { font-size:13px; color:#333; margin-top:6px; }
+.expanded { flex: 1 }
 </style>
 </head>
 <body>
@@ -1227,6 +1227,9 @@ function renderSolutions(solutions){
     div.innerHTML = `<div>#${idx+1} len:${s.length} moves: <b>${s.movesStr}</b></div>`;
     const playBtn = document.createElement('button'); playBtn.textContent = 'Play'; playBtn.addEventListener('click', ()=> playSolution(s));
     const exportBtn = document.createElement('button'); exportBtn.textContent = 'Export'; exportBtn.addEventListener('click', ()=> exportSolution(s));
+    const expanded = document.createElement('div');
+    expanded.className = 'expanded';
+    div.appendChild(expanded);
     div.appendChild(playBtn); div.appendChild(exportBtn);
     solutionsListEl.appendChild(div);
   });
