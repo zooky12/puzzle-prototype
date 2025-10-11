@@ -93,6 +93,20 @@
       color:#ff8f9b;
     }
     .play-controls { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; width:100%; }
+    .info-panel { width:100%; background: rgba(12, 18, 40, 0.7); border:1px solid rgba(255, 255, 255, 0.1); border-radius:14px; padding:12px 16px; color: var(--text-primary); box-shadow: 0 14px 34px rgba(5, 14, 42, 0.28); backdrop-filter: blur(12px); }
+    .info-panel summary { cursor:pointer; list-style:none; font-weight:600; display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:15px; letter-spacing:0.01em; }
+    .info-panel summary::marker { display:none; }
+    .info-panel summary::after { content:'▾'; font-size:16px; transition: transform 160ms ease; color: var(--text-muted); }
+    .info-panel[open] summary::after { transform: rotate(-180deg); }
+    .info-panel[open] summary { color:#7faaff; }
+    .info-panel summary span { font-size:13px; color: var(--text-muted); font-weight:500; }
+    .info-content { margin-top:14px; display:grid; gap:16px; }
+    .info-section h4 { margin:0 0 6px; font-size:14px; font-weight:600; letter-spacing:0.03em; text-transform:uppercase; color: var(--text-muted); }
+    .info-section ul { margin:0; padding-left:18px; display:grid; gap:6px; font-size:13px; color: var(--text-primary); }
+    .info-section li { line-height:1.5; }
+    .info-section dl { margin:0; display:grid; gap:8px; }
+    .info-section dt { font-size:13px; font-weight:600; color:#9fb7ff; }
+    .info-section dd { margin:4px 0 0 0; font-size:13px; color: var(--text-primary); line-height:1.5; }
     .control-stack { display:flex; flex-direction:column; gap:24px; }
     button, select, input {
       font: inherit;
@@ -197,6 +211,67 @@
           <button id="reset-btn">Reset (R)</button>
           <button id="undo-btn">Undo (E)</button>
         </div>
+        <details class="info-panel">
+          <summary>Game Basics <span>movement &middot; goals &middot; hazards</span></summary>
+          <div class="info-content">
+            <div class="info-section">
+              <h4>Basic Movement</h4>
+              <ul>
+                <li>Use <strong>W A S D</strong> to walk one tile at a time.</li>
+                <li>Walking onto a box slips you inside it; the direction you entered becomes that box's <em>entryDir</em>.</li>
+                <li>While inside a box, pressing the opposite of the entryDir launches a reverse-flight glide until something blocks you.</li>
+                <li><strong>Undo (E)</strong> steps backward through recent moves, even after pushes or flights.</li>
+              </ul>
+            </div>
+            <div class="info-section">
+              <h4>Win &amp; Lose</h4>
+              <ul>
+                <li><strong>Win</strong>: stand free on the <em>Exit</em> once every pressure plate is held down by a box.</li>
+                <li><strong>Lose</strong>: ending free on a player hole or inbox on a box that fell into a hole.</li>
+                <li>Reset at any time with <strong>Reset (R)</strong> to reload the saved layout.</li>
+              </ul>
+            </div>
+            <div class="info-section">
+              <h4>Core Mechanics</h4>
+              <ul>
+                <li>Pressure plates must stay pressed (by any box type or the player) to power exits and other devices.</li>
+                <li>Spikes, sticky pads, and similar hazards may toggle, so watch for timing windows.</li>
+                <li>Fragile walls crumble into floor when a box moves through them or you glide over them.</li>
+                <li>Griles behave like holes for the player but support boxes, useful for routing pushes.</li>
+              </ul>
+            </div>
+            <div class="info-section">
+              <h4>Box Behavior</h4>
+              <ul>
+                <li><strong>Reverse flight</strong>: stepping opposite the entryDir glides you until blocked by bounds, no-fly surfaces, sticky tiles, or other boxes. Any fragile wall you pass over shatters to floor. Landing on a box drops you inside it with a new entryDir; landing on ground returns you to free mode.</li>
+                <li><strong>Normal box</strong>: any non-reverse move tries to push the box one tile. Chains push if the next space is clear for boxes. Boxes that slide into holes disappear, leaving you inbox on that hole (a loss). EntryDir stays whatever it was when you entered or after the last flight.</li>
+                <li><strong>Heavy box</strong>: behaves like a normal box except when moving in the entryDir into an empty space - it steps forward once and neutralizes entryDir to {0,0}. While neutralized, the next successful move in any direction re-arms entryDir to the opposite of that move; failed pushes leave it neutralized. If blocked by another box, it falls back to normal push rules with the existing entryDir. Reverse-flight and off-axis moves behave just like a normal box.</li>
+                <li><strong>Chains &amp; holes</strong>: box pushes cascade through any adjacent boxes so long as the final space is open. A box that drops into a hole is removed; if it was your current box you remain inbox on the hole tile and immediately lose.</li>
+              </ul>
+            </div>
+            <div class="info-section">
+              <h4>Block Reference</h4>
+              <dl>
+                <dt>Floor</dt>
+                <dd>Standard tile; everyone can cross.</dd>
+                <dt>Wall</dt>
+                <dd>Solid obstacle for both player and crates.</dd>
+                <dt>Hole</dt>
+                <dd>Fatal drop for the player; crates disappear when pushed in.</dd>
+                <dt>Exit</dt>
+                <dd>Goal tile; often opens only when linked plates are active.</dd>
+                <dt>Pressure Plate</dt>
+                <dd>Triggers when held down by the player or a crate; wiring depends on level logic.</dd>
+                <dt>Spikes</dt>
+                <dd>Damage tiles that may cycle on/off; time your steps carefully.</dd>
+                <dt>Grile</dt>
+                <dd>Acts like a porous grate - blocks crates but lets the player pass.</dd>
+                <dt>Hole Spikes / Slim Path</dt>
+                <dd>Combination hazards that restrict crate movement and can punish missteps.</dd>
+              </dl>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section class="control-stack">
@@ -529,3 +604,11 @@
   </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
