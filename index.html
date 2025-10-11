@@ -117,6 +117,18 @@
       padding:8px 14px;
       transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
     }
+    .levels-card select {
+      color: var(--text-primary);
+      background: rgba(11, 16, 33, 0.82);
+    }
+    .levels-card select:focus {
+      color:#11131d;
+      background: rgba(243, 245, 255, 0.92);
+    }
+    .levels-card select option {
+      background-color: rgba(14, 20, 38, 0.95);
+      color: var(--text-primary);
+    }
     button:hover, select:hover { background: var(--button-hover); }
     button:active { transform: translateY(1px); }
     button:disabled { opacity:0.55; cursor:not-allowed; }
@@ -177,7 +189,6 @@
       display:flex;
       gap:12px;
       align-items:center;
-      white-space:nowrap;
     }
     .solutionItem .solutionText { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; min-width:0; }
     .solutionItem .solutionActions { display:flex; gap:8px; }

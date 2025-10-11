@@ -1,4 +1,8 @@
 {
+  "size": {
+    "rows": 12,
+    "cols": 12
+  },
   "base": [
     [
       "floor",
@@ -65,7 +69,7 @@
       "floor",
       "floor",
       "exit",
-      "hole",
+      "slimPathHole",
       "wall",
       "floor",
       "floor"
@@ -169,23 +173,31 @@
       "floor"
     ]
   ],
-  "boxes": [
+  "entities": [
     {
+      "type": "box",
       "x": 6,
       "y": 4
     },
     {
+      "type": "box",
       "x": 5,
       "y": 5
     },
     {
+      "type": "box",
       "x": 5,
       "y": 6
+    },
+    {
+      "type": "player",
+      "x": 4,
+      "y": 3,
+      "state": {
+        "mode": "free",
+        "x": 4,
+        "y": 3
+      }
     }
-  ],
-  "player": {
-    "mode": "free",
-    "x": 4,
-    "y": 3
-  }
+  ]
 }
