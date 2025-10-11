@@ -439,6 +439,7 @@
             <div class="build-actions">
               <button id="clear-btn">Clear</button>
               <button id="fill-floor">Fill Floor</button>
+              <button id="place-one">Place 1</button>
               <button id="simplify-keep" title="Simplify level (preserve dead ends)">Simplify (strict)</button>
               <button id="simplify-flex" title="Simplify level (dead ends may change)">Simplify (flex)</button>
             </div>
@@ -579,6 +580,7 @@
     import { isWinningState, isLosingState } from './core/goals.js';
     import { setupAutoUI, simplifyLevel } from './ui/auto.js';
     import { runSolver, cancelSolver } from './solver/solver.js';
+    import { isTrait } from './core/tiles.js';
 
     // Globals (minimum for the UI)
     let state = createEmptyState(12, 12);
@@ -841,6 +843,89 @@
     }
     if (simplifyStrictBtn) simplifyStrictBtn.addEventListener('click', () => runSimplify(true));
     if (simplifyFlexBtn) simplifyFlexBtn.addEventListener('click', () => runSimplify(false));
+
+    // Place 1: try placing the currently selected tile at every valid cell and pick the hardest result
+    const placeOneBtn = document.getElementById('place-one');
+    if (placeOneBtn) {
+      placeOneBtn.addEventListener('click', async () => {
+        // Only works in Build mode
+        if (!buildMode) return alert('Enter Build Tools first (Show Build Tools).');
+
+        // Determine selected tile from Build Tiles chips
+        const activeTileBtn = document.querySelector('#buildTiles .tile-chip.active[data-tile], .build-controls .tile-chip.active[data-tile]');
+        const tileType = activeTileBtn?.dataset?.tile;
+        if (!tileType) return alert('Select a tile in Build Tools (Tiles dropdown) first.');
+
+        const rows = state.size.rows;
+        const cols = state.size.cols;
+        // Solver limits from Solver Tools inputs
+        const limits = {
+          maxDepth: Number(document.getElementById('solverMaxDepth')?.value) || 100,
+          maxNodes: Number(document.getElementById('solverMaxNodes')?.value) || 200000,
+          maxSolutions: Number(document.getElementById('solverMaxSolutions')?.value) || 50
+        };
+        const status = document.getElementById('autoProgress') || document.getElementById('solverProgress');
+        placeOneBtn.disabled = true;
+        const prevText = status ? status.textContent : '';
+
+        function canPlaceAt(x, y) {
+          // Skip if identical
+          const cur = state.base[y][x] || 'floor';
+          if (cur === tileType) return false;
+          // Do not place under any entity
+          const anyEnt = state.entities?.some(e => e.x === x && e.y === y);
+          if (anyEnt) return false;
+          // If a box/heavyBox is here (should be caught above), or may be placed later, be conservative:
+          // If placing a tile that blocks boxes, avoid if a box is here
+          const blocksBox = isTrait(tileType, 'isWallForBox') || isTrait(tileType, 'isHoleForBox');
+          if (blocksBox) {
+            const hasBox = state.entities?.some(e => (e.type === 'box' || e.type === 'heavyBox') && e.x === x && e.y === y);
+            if (hasBox) return false;
+          }
+          return true;
+        }
+
+        let best = null; // {x,y, solutions, fastest, deadEnds}
+        let checked = 0;
+        for (let y = 0; y < rows; y++) {
+          for (let x = 0; x < cols; x++) {
+            if (!canPlaceAt(x, y)) continue;
+            const test = cloneState(state);
+            test.base[y][x] = tileType;
+            const res = await runSolver(test, { ...limits, onProgress: () => {} });
+            const sols = Array.isArray(res?.solutions) ? res.solutions : [];
+            if (!sols.length) { checked++; continue; }
+            const deads = Array.isArray(res?.deadEnds) ? res.deadEnds : [];
+            const fastest = Math.min(...sols.map(s => s.length));
+
+            // Hardness: maximize fastest steps; then maximize dead ends; then minimize solutions
+            if (!best ||
+                fastest > best.fastest ||
+                (fastest === best.fastest && deads.length > best.deadEnds) ||
+                (fastest === best.fastest && deads.length === best.deadEnds && sols.length < best.solutions)) {
+              best = { x, y, solutions: sols.length, fastest, deadEnds: deads.length };
+            }
+            checked++;
+            if (status && checked % 10 === 0) status.textContent = `Evaluated ${checked}/${rows*cols} cells...`;
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+
+        if (best) {
+          undoStack.push(cloneState(state));
+          state.base[best.y][best.x] = tileType;
+          setGameState(null);
+          refresh();
+          if (status) status.textContent = `Placed at (${best.x},${best.y}) · steps:${best.fastest} sols:${best.solutions} deads:${best.deadEnds}`;
+        } else {
+          if (status) status.textContent = 'No valid placement found (or none improved solvability).';
+        }
+        placeOneBtn.disabled = false;
+        if (status && !prevText) {
+          // leave the helpful result text; otherwise restore previous
+        }
+      });
+    }
 
     // Gameplay controls
     window.addEventListener('keydown', (e) => {
