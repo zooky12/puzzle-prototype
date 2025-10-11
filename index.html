@@ -161,6 +161,11 @@
     .section-label { font-size:12px; text-transform:uppercase; letter-spacing:0.08em; color: var(--text-muted); margin-bottom:8px; }
     .button-grid { display:grid; gap:8px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
     .build-actions { display:flex; flex-wrap:wrap; gap:10px; }
+    .size-controls { display:flex; flex-direction:column; gap:10px; margin-top:10px; }
+    .size-controls .section-label { margin-bottom:4px; }
+    .size-grid { display:grid; gap:8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .size-controls button { font-size:12px; padding:6px 10px; }
+    .size-compact { align-self:flex-start; }
     input[type="file"] { display:none; }
     .build-card.active { border-color: var(--highlight-border); box-shadow: 0 22px 55px rgba(62, 123, 255, 0.35); }
     #build-mode-btn { align-self:flex-start; padding:10px 18px; font-weight:600; }
@@ -340,6 +345,22 @@
               <button id="clear-btn">Clear</button>
               <button id="fill-floor">Fill Floor</button>
               <input type="file" id="import-file">
+            </div>
+            <div class="size-controls">
+              <div class="section-label">Resize Grid</div>
+              <div class="size-grid">
+                <button id="add-row-top">+ Row Top</button>
+                <button id="remove-row-top">- Row Top</button>
+                <button id="add-row-bottom">+ Row Bottom</button>
+                <button id="remove-row-bottom">- Row Bottom</button>
+              </div>
+              <div class="size-grid">
+                <button id="add-col-left">+ Col Left</button>
+                <button id="remove-col-left">- Col Left</button>
+                <button id="add-col-right">+ Col Right</button>
+                <button id="remove-col-right">- Col Right</button>
+              </div>
+              <button id="compact-grid" class="size-compact">Compact Borders</button>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 // ui/build.js
-import { cloneState } from '../core/state.js';
+import { cloneState, addRow, removeRow, addColumn, removeColumn, compactState } from '../core/state.js';
 import { EntityTypes } from '../core/entities.js';
 
 const pushableTypes = new Set([EntityTypes.box, EntityTypes.heavyBox]);
@@ -115,4 +115,31 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
   canvasEl.addEventListener('mousemove', dragAt);
   canvasEl.addEventListener('mouseup', ()=> mouseDown=false);
   canvasEl.addEventListener('mouseleave', ()=> mouseDown=false);
+
+  const sizeButtons = [
+    { id:'add-row-top', handler: (s) => addRow(s, 'top') },
+    { id:'add-row-bottom', handler: (s) => addRow(s, 'bottom') },
+    { id:'remove-row-top', handler: (s) => removeRow(s, 'top') },
+    { id:'remove-row-bottom', handler: (s) => removeRow(s, 'bottom') },
+    { id:'add-col-left', handler: (s) => addColumn(s, 'left') },
+    { id:'add-col-right', handler: (s) => addColumn(s, 'right') },
+    { id:'remove-col-left', handler: (s) => removeColumn(s, 'left') },
+    { id:'remove-col-right', handler: (s) => removeColumn(s, 'right') },
+    { id:'compact-grid', handler: (s) => compactState(s) }
+  ];
+
+  sizeButtons.forEach(({ id, handler }) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      if (!isBuildMode()) return;
+      const current = getState();
+      const next = handler(current);
+      if (!next || next.size.cols < 1 || next.size.rows < 1) return;
+      onSnapshot();
+      setState(next);
+      onModified();
+      requestRedraw();
+    });
+  });
 }
