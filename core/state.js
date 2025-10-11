@@ -1,5 +1,6 @@
 // core/state.js
-import { EntityRegistry, EntityTypes } from './entities.js';
+import { EntityRegistry, EntityTypes, isSolid } from './entities.js';
+import { isTrait } from './tiles.js';
 
 export function createEmptyState(rows, cols) {
   return {
@@ -223,4 +224,28 @@ export function deserializeState(json) {
   });
 
   return data;
+}
+
+// Ensure player is not placed on illegal tiles or on occupied cells.
+// Mutates the provided state in place. If the current player position is invalid,
+// moves the player to the first valid cell found when scanning rows top-to-bottom.
+export function ensurePlayerValidPosition(state) {
+  const idx = state.entities.findIndex(e => e.type === EntityTypes.player);
+  if (idx < 0) return state;
+  const p = state.entities[idx];
+  const tileAt = (x, y) => (state.base[y][x] || 'floor');
+  const isBlocked = (x, y) => {
+    const t = tileAt(x, y);
+    if (isTrait(t, 'isWallForPlayer') || isTrait(t, 'isHoleForPlayer')) return true;
+    // Do not allow starting over any entity (box, heavyBox, fragileWall, or another player)
+    const anyHere = state.entities.some(e => e.x === x && e.y === y && e !== p);
+    return anyHere;
+  };
+  if (!isBlocked(p.x, p.y)) return state;
+  for (let y = 0; y < state.size.rows; y++) {
+    for (let x = 0; x < state.size.cols; x++) {
+      if (!isBlocked(x, y)) { p.x = x; p.y = y; return state; }
+    }
+  }
+  return state;
 }

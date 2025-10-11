@@ -1,5 +1,5 @@
 // ui/auto.js
-import { cloneState } from '../core/state.js';
+import { cloneState, removeRow, removeColumn } from '../core/state.js';
 import { EntityTypes, isSolid } from '../core/entities.js';
 import { isTrait, getTileTraits } from '../core/tiles.js';
 
@@ -138,10 +138,22 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       if (fastest < params.minFastestSteps) continue;
       if (deadEnds.length < params.minDeadEnds) continue;
 
-      // Try to simplify newly changed tiles while preserving solver outputs
-      await simplifyTilesPreservingResult({ base: originalBase, candidate, params, runSolver, prevResult: { solutions, deadEnds } });
+      // Note: Do not simplify candidates automatically here; user can run Simplify from Build Tools
 
-      const score = [solutions.length, -deadEnds.length, -fastest];
+      // Order candidates by requested preference
+      let score;
+      switch (params.order) {
+        case 'mostDeadEnds':
+          score = [-deadEnds.length, solutions.length, -fastest];
+          break;
+        case 'mostSteps':
+          score = [-fastest, solutions.length, -deadEnds.length];
+          break;
+        case 'leastSolutions':
+        default:
+          score = [solutions.length, -deadEnds.length, -fastest];
+          break;
+      }
       best.push({ state: cloneState(candidate), solutions, deadEnds, fastest, score });
       best.sort((a, b) => a.score[0] - b.score[0] || a.score[1] - b.score[1] || a.score[2] - b.score[2]);
       if (best.length > 20) best.length = 20;
@@ -239,8 +251,8 @@ function ensurePlayer(state) {
   const canStand = (x, y) => {
     const t = (state.base[y][x] || 'floor');
     if (isTrait(t, 'isWallForPlayer') || isTrait(t, 'isHoleForPlayer')) return false;
-    const solidHere = state.entities?.some(e => isSolid(e) && e.x === x && e.y === y);
-    return !solidHere;
+    const anyHere = state.entities?.some(e => e.x === x && e.y === y);
+    return !anyHere;
   };
   const options = [];
   for (let y = 0; y < state.size.rows; y++) {
@@ -393,6 +405,85 @@ function stateKey(s) {
   return JSON.stringify({ base: s.base, ents });
 }
 
+// Public: Simplify an entire level by iteratively
+// 1) removing outer rows/cols, and
+// 2) replacing tiles with simpler equivalents,
+// while preserving solver outputs: same solutions and step counts; and optionally same dead-end counts.
+export async function simplifyLevel(inputState, { runSolver, params = {}, preserveDeadEnds = true } = {}) {
+  let current = cloneState(inputState);
+  const limits = {
+    maxDepth: params.maxDepth || 100,
+    maxNodes: params.maxNodes || 200000,
+    maxSolutions: Math.max(params.maxSolutions || 50, 1)
+  };
+  let baseline = await runSolver(current, { ...limits, onProgress: () => {} });
+  let baseSig = solverSignature(baseline);
+
+  async function same(sig) { return sameSignature(baseSig, sig, preserveDeadEnds); }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+
+    // Try border removals greedily
+    const borderMutations = [
+      (s) => removeRow(s, 'top'),
+      (s) => removeRow(s, 'bottom'),
+      (s) => removeColumn(s, 'left'),
+      (s) => removeColumn(s, 'right')
+    ];
+    let removed = false;
+    for (const mut of borderMutations) {
+      const next = mut(current);
+      if (!next) continue;
+      const res = await runSolver(next, { ...limits, onProgress: () => {} });
+      const sig = solverSignature(res);
+      if (await same(sig)) {
+        current = next;
+        baseSig = sig;
+        removed = true;
+        changed = true;
+        break; // restart outer loop to allow cascading removals
+      }
+      await tick();
+    }
+    if (removed) continue;
+
+    // Try to simplify tiles across whole grid; one change at a time
+    let simplifiedOne = false;
+    outer: for (let y = 0; y < current.size.rows; y++) {
+      for (let x = 0; x < current.size.cols; x++) {
+        const cur = current.base[y][x] || 'floor';
+        const simplerOptions = ['wall','hole','floor']
+          .filter(t => isSimplerTile(t, cur))
+          .sort((a, b) => tileRank(a) - tileRank(b));
+        if (!simplerOptions.length) continue;
+
+        const hasBox = current.entities?.some(e => (e.type === EntityTypes.box || e.type === EntityTypes.heavyBox) && e.x === x && e.y === y);
+        const options = simplerOptions.filter(t => !hasBox || allowsBoxTile(t));
+        for (const t of options) {
+          const prev = cur;
+          const testState = cloneState(current);
+          testState.base[y][x] = t;
+          const res = await runSolver(testState, { ...limits, onProgress: () => {} });
+          const sig = solverSignature(res);
+          if (await same(sig)) {
+            current = testState;
+            baseSig = sig;
+            simplifiedOne = true;
+            changed = true;
+            break outer;
+          }
+          await tick();
+        }
+      }
+    }
+    if (simplifiedOne) continue;
+  }
+
+  return current;
+}
+
 // Attempt to replace newly changed tiles with simpler ones while keeping solver outputs identical
 async function simplifyTilesPreservingResult({ base, candidate, params, runSolver, prevResult }) {
   const origSig = solverSignature(prevResult);
@@ -414,9 +505,9 @@ async function simplifyTilesPreservingResult({ base, candidate, params, runSolve
   for (const { x, y } of diffs) {
     let curType = candidate.base[y][x] || 'floor';
     while (true) {
-      const simplerOptions = ALL_TILES
-        .filter(t => t !== curType && isSimplerTile(t, curType))
-        .sort((t1, t2) => traitCount(t1) - traitCount(t2));
+      const simplerOptions = ['wall','hole','floor']
+        .filter(t => isSimplerTile(t, curType))
+        .sort((t1, t2) => tileRank(t1) - tileRank(t2));
       if (!simplerOptions.length) break;
 
       // If a box/heavyBox is at this cell, keep only box-legal tiles
@@ -458,12 +549,19 @@ function traitKeys(tileType) {
 
 function traitCount(tileType) { return traitKeys(tileType).length; }
 
+function tileRank(tileType) {
+  // Simplicity order: wall (simplest) < hole < floor (least simple among the three)
+  if (tileType === 'wall') return 0;
+  if (tileType === 'hole') return 1;
+  if (tileType === 'floor') return 2;
+  return Number.POSITIVE_INFINITY;
+}
+
 function isSimplerTile(candidateTile, originalTile) {
-  const a = new Set(traitKeys(candidateTile));
-  const b = new Set(traitKeys(originalTile));
-  if (a.size >= b.size) return false;
-  for (const k of a) if (!b.has(k)) return false;
-  return true;
+  // Simpler tiles are restricted to floor < hole < wall
+  const candR = tileRank(candidateTile);
+  const origR = tileRank(originalTile);
+  return candR < origR;
 }
 
 function solverSignature(result) {
@@ -473,11 +571,13 @@ function solverSignature(result) {
   return { s: norm(sols), d: norm(deads) };
 }
 
-function sameSignature(a, b) {
+function sameSignature(a, b, includeDeads = true) {
   if (!a || !b) return false;
   if (a.s.length !== b.s.length || a.d.length !== b.d.length) return false;
   for (let i = 0; i < a.s.length; i++) if (a.s[i] !== b.s[i]) return false;
-  for (let i = 0; i < a.d.length; i++) if (a.d[i] !== b.d[i]) return false;
+  if (includeDeads) {
+    for (let i = 0; i < a.d.length; i++) if (a.d[i] !== b.d[i]) return false;
+  }
   return true;
 }
 

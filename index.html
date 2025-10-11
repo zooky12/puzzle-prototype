@@ -439,7 +439,8 @@
             <div class="build-actions">
               <button id="clear-btn">Clear</button>
               <button id="fill-floor">Fill Floor</button>
-              <input type="file" id="import-file">
+              <button id="simplify-keep" title="Simplify level (preserve dead ends)">Simplify (strict)</button>
+              <button id="simplify-flex" title="Simplify level (dead ends may change)">Simplify (flex)</button>
             </div>
             <div class="size-controls">
               <div class="section-label">Resize Grid</div>
@@ -496,19 +497,26 @@
           <div id="autoPanel" class="hidden" aria-hidden="true">
             <div class="solver-grid">
               <label>Max solutions
-                <input id="autoMaxSolutions" type="number" value="10" min="1" />
+                <input id="autoMaxSolutions" type="number" value="100" min="1" />
               </label>
               <label>Min fastest steps
-                <input id="autoMinFastest" type="number" value="5" min="1" />
+                <input id="autoMinFastest" type="number" value="10" min="1" />
               </label>
               <label>Min dead ends
                 <input id="autoMinDeadEnds" type="number" value="0" min="0" />
               </label>
               <label>Max tiles changed
-                <input id="autoMaxChanges" type="number" value="3" min="1" />
+                <input id="autoMaxChanges" type="number" value="5" min="1" />
               </label>
               <label>Attempts
                 <input id="autoAttempts" type="number" value="5000" min="1" />
+              </label>
+              <label>Order by
+                <select id="autoOrder">
+                  <option value="leastSolutions" selected>Least Solutions</option>
+                  <option value="mostDeadEnds">Most Dead Ends</option>
+                  <option value="mostSteps">Most Steps</option>
+                </select>
               </label>
             </div>
             <div class="solver-actions" aria-label="Entity mutations">
@@ -562,14 +570,14 @@
   </div>
 
   <script type="module">
-    import { createEmptyState, cloneState } from './core/state.js';
+    import { createEmptyState, cloneState, ensurePlayerValidPosition } from './core/state.js';
     import { draw, initCanvas, animate } from './ui/canvas.js';
     import { setupBuildUI } from './ui/build.js';
     import { setupHUD } from './ui/hud.js';
     import { loadLevelList, loadLevel, exportLevel, importLevel } from './ui/io.js';
     import { stepMove } from './core/engine.js';
     import { isWinningState, isLosingState } from './core/goals.js';
-    import { setupAutoUI } from './ui/auto.js';
+    import { setupAutoUI, simplifyLevel } from './ui/auto.js';
     import { runSolver, cancelSolver } from './solver/solver.js';
 
     // Globals (minimum for the UI)
@@ -685,6 +693,7 @@
         try {
           const data = await loadLevel(name);
           state = data;
+          ensurePlayerValidPosition(state);
           savedSnapshot = cloneState(state);
           undoStack = [cloneState(state)];
           setGameState(null);
@@ -697,6 +706,7 @@
       onImport: async (file) => {
         try {
           state = await importLevel(file);
+          ensurePlayerValidPosition(state);
           savedSnapshot = cloneState(state);
           undoStack = [cloneState(state)];
           setGameState(null);
@@ -806,9 +816,39 @@
       }
     });
 
+    // Simplify buttons (Build Tools)
+    const simplifyStrictBtn = document.getElementById('simplify-keep');
+    const simplifyFlexBtn = document.getElementById('simplify-flex');
+    async function runSimplify(preserveDeadEnds) {
+      try {
+        const maxDepth = Number(document.getElementById('solverMaxDepth').value) || 100;
+        const maxNodes = Number(document.getElementById('solverMaxNodes').value) || 200000;
+        const maxSolutions = Number(document.getElementById('solverMaxSolutions').value) || 50;
+        const params = { maxDepth, maxNodes, maxSolutions };
+        const btns = [simplifyStrictBtn, simplifyFlexBtn];
+        btns.forEach(b => b && (b.disabled = true));
+        const simplified = await simplifyLevel(state, { runSolver: (s, opts) => runSolver(s, opts), params, preserveDeadEnds });
+        if (simplified) {
+          state = cloneState(simplified);
+          savedSnapshot = cloneState(state);
+          undoStack = [cloneState(state)];
+          setGameState(null);
+          refresh();
+        }
+      } finally {
+        [simplifyStrictBtn, simplifyFlexBtn].forEach(b => b && (b.disabled = false));
+      }
+    }
+    if (simplifyStrictBtn) simplifyStrictBtn.addEventListener('click', () => runSimplify(true));
+    if (simplifyFlexBtn) simplifyFlexBtn.addEventListener('click', () => runSimplify(false));
+
     // Gameplay controls
     window.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();
+      const ae = document.activeElement;
+      const typing = ae && ((ae.tagName === 'INPUT' && !['button','checkbox','radio','submit','reset'].includes(ae.type)) || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
+      if (typing) return; // do not steal keys while typing in inputs/textareas
+
       if (buildMode) {
         if (key === 'e') { e.preventDefault(); document.getElementById('undo-btn').click(); }
         if (key === 'r') { e.preventDefault(); document.getElementById('reset-btn').click(); }
