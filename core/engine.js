@@ -202,8 +202,9 @@ export function stepMove(state, { dx, dy }) {
   const sameAsEntry = isSameDir({dx,dy}, player.state.entryDir);
   const entryZero = isZeroDir(player.state.entryDir);
 
-  const blockedForBox = isBlockedForBox(s, target.x, target.y);
   const frontPushable = firstEntityAt(s, target.x, target.y, isPushable);
+  const solidFrontBox = firstEntityAt(s, target.x, target.y, isSolid);
+  const blockedForBox = isTrait(targetTile,'isWallForBox') || (!!solidFrontBox && !frontPushable);
 
   if (isHeavy) {
     // Cas A: mateix sentit que entryDir (i entry != 0)

@@ -6,6 +6,7 @@ import { isTrait, getTileTraits } from '../core/tiles.js';
 export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
   const runBtn = document.getElementById('runAuto');
   const stopBtn = document.getElementById('stopAuto');
+  const restoreBtn = document.getElementById('autoRestore');
   const progressEl = document.getElementById('autoProgress');
   const listEl = document.getElementById('autoList');
   const panelEl = document.getElementById('autoPanel');
@@ -54,6 +55,16 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     stopBtn.disabled = true;
   });
 
+  let originalBase = null;
+
+  if (restoreBtn) {
+    restoreBtn.addEventListener('click', () => {
+      if (!originalBase) return;
+      setState(cloneState(originalBase));
+      progressEl.textContent = 'Restored original base.';
+    });
+  }
+
   runBtn.addEventListener('click', async () => {
     if (panelEl.classList.contains('hidden')) {
       toggleBtn.click();
@@ -61,9 +72,12 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     cancel = false;
     runBtn.disabled = true;
     stopBtn.disabled = false;
+    if (restoreBtn) restoreBtn.disabled = false;
     listEl.innerHTML = '';
 
     const params = readParams();
+    // capture the base level used to generate from
+    originalBase = cloneState(getState());
     const best = [];
     const seen = new Set();
     let duplicateStreak = 0;
@@ -81,8 +95,8 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       progressEl.textContent = `Attempt ${attemptsDone + 1}/${params.attempts}`;
       await tick();
 
-      const base = getState();
-      let candidate = cloneState(base);
+      // Always start from the original snapshot taken at Generate start
+      let candidate = cloneState(originalBase);
 
       ensurePlayer(candidate);
 
@@ -125,7 +139,7 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       if (deadEnds.length < params.minDeadEnds) continue;
 
       // Try to simplify newly changed tiles while preserving solver outputs
-      await simplifyTilesPreservingResult({ base, candidate, params, runSolver, prevResult: { solutions, deadEnds } });
+      await simplifyTilesPreservingResult({ base: originalBase, candidate, params, runSolver, prevResult: { solutions, deadEnds } });
 
       const score = [solutions.length, -deadEnds.length, -fastest];
       best.push({ state: cloneState(candidate), solutions, deadEnds, fastest, score });
@@ -251,8 +265,22 @@ function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
     const boxAt = state.entities?.some(e => (e.type === EntityTypes.box || e.type === EntityTypes.heavyBox) && e.x === x && e.y === y);
     const candidateTargets = targets.filter(t => t !== cur && (!boxAt || allowsBoxTile(t)));
     if (!candidateTargets.length) continue;
-    const pick = candidateTargets[Math.floor(Math.random() * candidateTargets.length)];
+    let pick = candidateTargets[Math.floor(Math.random() * candidateTargets.length)];
     if (!pick) continue; // safety
+
+    // Special case: selecting fragileWall means place an ENTITY overlay, not a base tile
+    if (pick === 'fragileWall') {
+      // Do not place over a wall tile; allow over anything else
+      if (cur === 'wall') continue;
+      // Avoid stacking on an existing solid entity at that cell
+      const solidHere = state.entities?.some(e => isSolid(e) && e.x === x && e.y === y);
+      if (solidHere) continue;
+      // Add fragile wall entity preserving the underlying tile for break behavior
+      state.entities.push({ type: EntityTypes.fragileWall, x, y, underTile: cur });
+      changes++;
+      continue;
+    }
+
     state.base[y][x] = pick;
     changes++;
   }
