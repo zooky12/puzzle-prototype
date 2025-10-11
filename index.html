@@ -31,8 +31,8 @@
       <div style="margin-top:6px;">
         <label for="server-levels" style="font-size:12px;margin-right:6px;">Levels:</label>
         <select id="server-levels" style="min-width:220px;"></select>
-        <button id="refresh-server">Refresh</button>
         <button id="load-server">Load</button>
+        <button id="refresh-server">Refresh</button>
       </div>
     </div>
 
@@ -124,6 +124,23 @@
     function refresh() { draw(state); }
     function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
+    async function refreshLevelDropdown() {
+      const list = await loadLevelList();
+      const sel = document.getElementById('server-levels');
+      sel.innerHTML = '';
+      if (!list || list.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = ''; opt.textContent = '(no levels found or index.json missing)';
+        sel.appendChild(opt);
+      } else {
+        list.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name; opt.textContent = name;
+          sel.appendChild(opt);
+        });
+      }
+    }
+
     // HUD + Keybinds
     setupHUD({
       onToggleBuildMode() {
@@ -162,22 +179,7 @@
       onToggleSolver() {
         document.getElementById('solverPanel').classList.toggle('hidden');
       },
-      onRefreshLevels: async () => {
-        const list = await loadLevelList();
-        const sel = document.getElementById('server-levels');
-        sel.innerHTML = '';
-        if (!list || list.length === 0) {
-          const opt = document.createElement('option');
-          opt.value = ''; opt.textContent = '(no levels found or index.json missing)';
-          sel.appendChild(opt);
-        } else {
-          list.forEach(name => {
-            const opt = document.createElement('option');
-            opt.value = name; opt.textContent = name;
-            sel.appendChild(opt);
-          });
-        }
-      },
+      onRefreshLevels: refreshLevelDropdown,
       onLoadLevel: async () => {
         const sel = document.getElementById('server-levels');
         const name = sel.value;
@@ -300,6 +302,9 @@
 
     // Primera render
     refresh();
+
+    // Refresh level list when entering the page
+    refreshLevelDropdown();
   </script>
 </body>
 </html>
