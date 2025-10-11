@@ -17,9 +17,9 @@ export function setupHUD({
   document.getElementById('export-btn').addEventListener('click', onExport);
   document.getElementById('import-btn').addEventListener('click', () => document.getElementById('import-file').click());
   document.getElementById('import-file').addEventListener('change', (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    onImport(f);
+    const file = e.target.files[0];
+    if (!file) return;
+    onImport(file);
     e.target.value = '';
   });
 
@@ -109,7 +109,7 @@ export function setupHUD({
 
           const parts = [`Done. solutions: ${solutions.length}`, `dead ends: ${deadEnds.length}`];
           if (Number.isFinite(stats.nodesExpanded)) parts.push(`nodes: ${stats.nodesExpanded}`);
-          statusEl.textContent = parts.join(' · ');
+          statusEl.textContent = parts.join(' | ');
         }
       });
     } catch (err) {
