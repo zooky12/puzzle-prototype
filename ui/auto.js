@@ -271,37 +271,52 @@ const ALL_TILES = ['floor','wall','hole','exit','pressurePlate','grile','spikes'
 function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
   const sourceSet = new Set(sourceAllowed && sourceAllowed.length ? sourceAllowed : ALL_TILES);
   const targets = targetAllowed && targetAllowed.length ? targetAllowed : ALL_TILES;
-  const coords = [];
-  for (let y = 0; y < state.size.rows; y++) for (let x = 0; x < state.size.cols; x++) coords.push({ x, y });
-  shuffle(coords);
+
+  // Build eligible coordinates once (avoid full shuffle)
+  const eligible = [];
+  for (let y = 0; y < state.size.rows; y++) {
+    for (let x = 0; x < state.size.cols; x++) {
+      const cur = state.base[y][x] || 'floor';
+      if (sourceSet.has(cur)) eligible.push({ x, y, cur });
+    }
+  }
+  if (!eligible.length) return false;
+
   let changes = 0;
-  for (const { x, y } of coords) {
-    if (changes >= maxChanges) break;
-    const cur = state.base[y][x] || 'floor';
-    if (!sourceSet.has(cur)) continue;
+  const tried = new Set();
+  const maxTries = Math.min(eligible.length * 2, Math.max(eligible.length, maxChanges * 12));
+
+  function tryIndex(idx) {
+    if (idx < 0 || idx >= eligible.length) return false;
+    const key = idx;
+    if (tried.has(key)) return false;
+    tried.add(key);
+    const { x, y, cur } = eligible[idx];
     // If there is a box/heavyBox at this cell, only choose tiles that support boxes
     const boxAt = state.entities?.some(e => (e.type === EntityTypes.box || e.type === EntityTypes.heavyBox) && e.x === x && e.y === y);
     const candidateTargets = targets.filter(t => t !== cur && (!boxAt || allowsBoxTile(t)));
-    if (!candidateTargets.length) continue;
+    if (!candidateTargets.length) return false;
     let pick = candidateTargets[Math.floor(Math.random() * candidateTargets.length)];
-    if (!pick) continue; // safety
+    if (!pick) return false; // safety
 
     // Special case: selecting fragileWall means place an ENTITY overlay, not a base tile
     if (pick === 'fragileWall') {
-      // Do not place over a wall tile; allow over anything else
-      if (cur === 'wall') continue;
-      // Avoid stacking on an existing solid entity at that cell
+      if (cur === 'wall') return false; // don't place on walls
       const solidHere = state.entities?.some(e => isSolid(e) && e.x === x && e.y === y);
-      if (solidHere) continue;
-      // Add fragile wall entity preserving the underlying tile for break behavior
+      if (solidHere) return false;
       state.entities.push({ type: EntityTypes.fragileWall, x, y, underTile: cur });
-      changes++;
-      continue;
+      return true;
     }
 
     state.base[y][x] = pick;
-    changes++;
+    return true;
   }
+
+  for (let t = 0; t < maxTries && changes < maxChanges; t++) {
+    const idx = Math.floor(Math.random() * eligible.length);
+    if (tryIndex(idx)) changes++;
+  }
+
   return changes > 0;
 }
 
@@ -396,13 +411,65 @@ function allowsBoxTile(tileType) {
 }
 
 // Build a stable, compact key for a candidate state to detect duplicates
+// Zobrist-like fast hash for dedupe (includes tiles and entities, player mode/dir)
+let zCache = null;
+function rndBig() {
+  const n = Math.floor(Math.random() * 2**30);
+  const m = Math.floor(Math.random() * 2**23);
+  return (BigInt(n) << 23n) ^ BigInt(m);
+}
+function ensureZ(rows, cols) {
+  if (zCache && zCache.rows === rows && zCache.cols === cols) return;
+  const tileTypes = Array.from(new Set(ALL_TILES.concat(['floor'])));
+  const makeGrid = () => Array.from({ length: rows }, () => Array.from({ length: cols }, () => rndBig()));
+  const tiles = {};
+  for (const t of tileTypes) tiles[t] = makeGrid();
+  const entities = {
+    box: makeGrid(),
+    heavyBox: makeGrid(),
+    fragileWall: makeGrid(),
+    player_free: makeGrid(),
+    player_inbox_r: makeGrid(),
+    player_inbox_l: makeGrid(),
+    player_inbox_u: makeGrid(),
+    player_inbox_d: makeGrid(),
+    player_inbox_z: makeGrid()
+  };
+  zCache = { rows, cols, salt: rndBig(), tiles, entities };
+}
+function dirKey(d) {
+  if (!d || (d.dx === 0 && d.dy === 0)) return 'z';
+  if (d.dx === 1) return 'r';
+  if (d.dx === -1) return 'l';
+  if (d.dy === -1) return 'u';
+  if (d.dy === 1) return 'd';
+  return 'z';
+}
 function stateKey(s) {
-  // Include base grid and a normalized list of entities (type,x,y)
-  const ents = (s.entities || [])
-    .map(e => ({ t: e.type, x: e.x, y: e.y }))
-    .sort((a, b) => (a.t > b.t ? 1 : a.t < b.t ? -1 : a.x - b.x || a.y - b.y));
-  // JSON stringify is acceptable here; for large grids this is still fine in UI context
-  return JSON.stringify({ base: s.base, ents });
+  ensureZ(s.size.rows, s.size.cols);
+  let h = 0n ^ zCache.salt;
+  // tiles
+  for (let y = 0; y < s.size.rows; y++) {
+    for (let x = 0; x < s.size.cols; x++) {
+      const tt = s.base[y][x] || 'floor';
+      const grid = zCache.tiles[tt];
+      if (grid) h ^= grid[y][x];
+    }
+  }
+  // entities
+  for (const e of (s.entities || [])) {
+    if (e.type === EntityTypes.player) {
+      if (e.state?.mode === 'free') h ^= zCache.entities.player_free[e.y][e.x];
+      else {
+        const k = dirKey(e.state?.entryDir);
+        h ^= zCache.entities['player_inbox_' + k][e.y][e.x];
+      }
+    } else {
+      const grid = zCache.entities[e.type];
+      if (grid) h ^= grid[e.y][e.x];
+    }
+  }
+  return h.toString();
 }
 
 // Public: Simplify an entire level by iteratively
