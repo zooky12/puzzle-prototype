@@ -7,10 +7,44 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
   const stopBtn = document.getElementById('stopAuto');
   const progressEl = document.getElementById('autoProgress');
   const listEl = document.getElementById('autoList');
+  const panelEl = document.getElementById('autoPanel');
+  const toggleBtn = document.getElementById('toggleAuto');
 
-  if (!runBtn || !stopBtn || !progressEl || !listEl) return;
+  if (!runBtn || !stopBtn || !progressEl || !listEl || !panelEl || !toggleBtn) return;
 
   let cancel = false;
+
+  toggleBtn.addEventListener('click', () => {
+    const expanded = toggleBtn.getAttribute('aria-pressed') === 'true';
+    const next = !expanded;
+    toggleBtn.setAttribute('aria-pressed', next ? 'true' : 'false');
+    toggleBtn.classList.toggle('active', next);
+    toggleBtn.textContent = next ? 'Hide Auto Creator' : 'Show Auto Creator';
+    panelEl.classList.toggle('hidden', !next);
+    panelEl.setAttribute('aria-hidden', next ? 'false' : 'true');
+  });
+
+  document.querySelectorAll('.tile-toggle[data-target]').forEach(btn => {
+    const target = document.getElementById(btn.dataset.target);
+    if (!target) return;
+    btn.addEventListener('click', () => {
+      const expanded = btn.getAttribute('aria-expanded') === 'true';
+      const next = !expanded;
+      btn.setAttribute('aria-expanded', next ? 'true' : 'false');
+      btn.classList.toggle('active', next);
+      target.classList.toggle('hidden', !next);
+      target.setAttribute('aria-hidden', next ? 'false' : 'true');
+    });
+  });
+
+  document.querySelectorAll('.tile-filter-panel').forEach(panel => {
+    panel.addEventListener('click', (event) => {
+      const chip = event.target.closest('.tile-chip');
+      if (!chip) return;
+      const isActive = chip.classList.toggle('active');
+      chip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  });
 
   stopBtn.addEventListener('click', () => {
     cancel = true;
@@ -19,6 +53,9 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
   });
 
   runBtn.addEventListener('click', async () => {
+    if (panelEl.classList.contains('hidden')) {
+      toggleBtn.click();
+    }
     cancel = false;
     runBtn.disabled = true;
     stopBtn.disabled = false;
@@ -36,7 +73,7 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
 
       ensurePlayer(candidate);
 
-      const ok = mutateTiles(candidate, params.maxTilesChanged, params.onlyFloor, params.allowedTiles);
+      const ok = mutateTiles(candidate, params.maxTilesChanged, params.tilesChange, params.tilesPlace);
       if (!ok) continue;
 
       const result = await runSolver(candidate, {
@@ -75,11 +112,11 @@ function readParams() {
     if (!Number.isFinite(v)) return def;
     return Math.max(min ?? -Infinity, v);
   };
-  const getBool = (id) => !!document.getElementById(id)?.checked;
-  const getAllowedTiles = () => {
-    const wrap = document.getElementById('autoTilesAllowed');
-    if (!wrap) return null;
-    const selected = Array.from(wrap.querySelectorAll('input[type="checkbox"]')).filter(cb => cb.checked).map(cb => cb.value);
+  const getSelectedValues = (panelId) => {
+    const panel = document.getElementById(panelId);
+    if (!panel) return null;
+    const selected = Array.from(panel.querySelectorAll('.tile-chip.active'))
+      .map(btn => btn.dataset.value);
     return selected.length ? selected : null;
   };
 
@@ -89,8 +126,8 @@ function readParams() {
     minDeadEnds: getNum('autoMinDeadEnds', 10, 0),
     maxTilesChanged: getNum('autoMaxChanges', 3, 1),
     attempts: getNum('autoAttempts', 50, 1),
-    onlyFloor: getBool('autoOnlyFloor'),
-    allowedTiles: getAllowedTiles(),
+    tilesChange: getSelectedValues('autoTilesChange'),
+    tilesPlace: getSelectedValues('autoTilesPlace'),
     maxDepth: getNum('solverMaxDepth', 100, 1),
     maxNodes: getNum('solverMaxNodes', 200000, 100)
   };
@@ -121,7 +158,7 @@ function renderList(list, listEl, onPlaySolution, setState) {
 
     const useBtn = document.createElement('button');
     useBtn.textContent = 'Use';
-    useBtn.addEventListener('click', () => { setState(c.state); });
+    useBtn.addEventListener('click', () => { setState(cloneState(c.state)); });
     actions.appendChild(useBtn);
 
     row.appendChild(actions);
@@ -146,8 +183,9 @@ function ensurePlayer(state) {
 
 const ALL_TILES = ['floor','wall','hole','exit','pressurePlate','grile','spikes','holeSpikes','slimPathFloor','slimPathHole','fragileWall'];
 
-function mutateTiles(state, maxChanges, onlyFloor, allowedTiles) {
-  const allowed = allowedTiles && allowedTiles.length ? allowedTiles : ALL_TILES;
+function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
+  const sourceSet = new Set(sourceAllowed && sourceAllowed.length ? sourceAllowed : ALL_TILES);
+  const targets = targetAllowed && targetAllowed.length ? targetAllowed : ALL_TILES;
   const coords = [];
   for (let y = 0; y < state.size.rows; y++) for (let x = 0; x < state.size.cols; x++) coords.push({ x, y });
   shuffle(coords);
@@ -155,8 +193,8 @@ function mutateTiles(state, maxChanges, onlyFloor, allowedTiles) {
   for (const { x, y } of coords) {
     if (changes >= maxChanges) break;
     const cur = state.base[y][x] || 'floor';
-    if (onlyFloor && cur !== 'floor') continue;
-    const pick = randomOther(allowed, cur);
+    if (!sourceSet.has(cur)) continue;
+    const pick = randomOther(targets, cur);
     if (!pick) continue;
     state.base[y][x] = pick;
     changes++;
