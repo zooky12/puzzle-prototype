@@ -262,6 +262,9 @@
       gap:6px;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     }
+    /* Ensure Build dropdowns span full width like Auto Creator */
+    .build-card .build-groups { display:flex !important; flex-direction:column !important; gap:20px; }
+    .build-card .tile-filter-options { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
     .tile-chip {
       border:1px solid var(--button-border);
       background: rgba(37, 52, 92, 0.4);
@@ -290,7 +293,8 @@
     #build-mode-btn.active,
     .build-controls button.active,
     #toggleSolver.active,
-    #toggleAuto.active {
+    #toggleAuto.active,
+    .auto-card .mutate-toggle.active {
       background: var(--highlight);
       color:#fff;
       border-color: var(--highlight-border);
@@ -384,7 +388,7 @@
           </div>
         </div>
 
-        <div class="card build-card">
+          <div class="card build-card">
           <div class="solver-header">
             <div>
               <h2 class="card-title">Build Tools</h2>
@@ -396,27 +400,31 @@
             <p class="hint">Toggle Build Tools to paint tiles or place entities. Drag across the grid to paint rapidly.</p>
             <div class="build-groups">
               <div class="build-section">
-                <div class="section-label">Tiles</div>
-                <div class="button-grid">
-                  <button data-tile="floor">Floor</button>
-                  <button data-tile="wall">Wall</button>
-                  <button data-tile="hole">Hole</button>
-                  <button data-tile="exit">Exit</button>
-                  <button data-tile="pressurePlate">Pressure Plate</button>
-                  <button data-tile="grile">Grile</button>
-                  <button data-tile="spikes">Spikes</button>
-                  <button data-tile="holeSpikes">Hole Spikes</button>
-                  <button data-tile="slimPathFloor">Slim Path Floor</button>
-                  <button data-tile="slimPathHole">Slim Path Hole</button>
+                <button type="button" class="tile-toggle" data-target="buildTiles" aria-expanded="false">Tiles</button>
+                <div class="tile-filter-panel hidden" id="buildTiles" aria-hidden="true">
+                  <div class="tile-filter-options">
+                    <button type="button" class="tile-chip" data-tile="floor" aria-pressed="false">Floor</button>
+                    <button type="button" class="tile-chip" data-tile="wall" aria-pressed="false">Wall</button>
+                    <button type="button" class="tile-chip" data-tile="hole" aria-pressed="false">Hole</button>
+                    <button type="button" class="tile-chip" data-tile="exit" aria-pressed="false">Exit</button>
+                    <button type="button" class="tile-chip" data-tile="pressurePlate" aria-pressed="false">Pressure Plate</button>
+                    <button type="button" class="tile-chip" data-tile="grile" aria-pressed="false">Grile</button>
+                    <button type="button" class="tile-chip" data-tile="spikes" aria-pressed="false">Spikes</button>
+                    <button type="button" class="tile-chip" data-tile="holeSpikes" aria-pressed="false">Hole Spikes</button>
+                    <button type="button" class="tile-chip" data-tile="slimPathFloor" aria-pressed="false">Slim Path Floor</button>
+                    <button type="button" class="tile-chip" data-tile="slimPathHole" aria-pressed="false">Slim Path Hole</button>
+                  </div>
                 </div>
               </div>
               <div class="build-section">
-                <div class="section-label">Entities</div>
-                <div class="button-grid">
-                  <button data-entity="box">Box</button>
-                  <button data-entity="heavyBox">Heavy Box</button>
-                  <button data-entity="fragileWall">Fragile Wall</button>
-                  <button data-entity="player">Player</button>
+                <button type="button" class="tile-toggle" data-target="buildEntities" aria-expanded="false">Entities</button>
+                <div class="tile-filter-panel hidden" id="buildEntities" aria-hidden="true">
+                  <div class="tile-filter-options">
+                    <button type="button" class="tile-chip" data-entity="box" aria-pressed="false">Box</button>
+                    <button type="button" class="tile-chip" data-entity="heavyBox" aria-pressed="false">Heavy Box</button>
+                    <button type="button" class="tile-chip" data-entity="fragileWall" aria-pressed="false">Fragile Wall</button>
+                    <button type="button" class="tile-chip" data-entity="player" aria-pressed="false">Player</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -500,6 +508,9 @@
                 <input id="autoAttempts" type="number" value="5000" min="1" />
               </label>
             </div>
+            <div class="solver-actions" aria-label="Entity mutations">
+              <button id="autoMovePlayer" class="mutate-toggle" aria-pressed="false">Move Player</button>
+            </div>
             <button type="button" class="tile-toggle" data-target="autoTilesChange" aria-expanded="false">Tiles allowed to change</button>
             <div class="tile-filter-panel hidden" id="autoTilesChange" aria-hidden="true">
               <div class="tile-filter-options">
@@ -514,6 +525,7 @@
                 <button type="button" class="tile-chip" data-value="slimPathFloor" aria-pressed="false">slimPathFloor</button>
                 <button type="button" class="tile-chip" data-value="slimPathHole" aria-pressed="false">slimPathHole</button>
                 <button type="button" class="tile-chip" data-value="fragileWall" aria-pressed="false">fragileWall</button>
+                <button type="button" class="tile-chip" data-option="removeBoxes" aria-pressed="false">Remove Boxes</button>
               </div>
             </div>
             <button type="button" class="tile-toggle" data-target="autoTilesPlace" aria-expanded="false">Tiles allowed to place</button>
@@ -530,6 +542,7 @@
                 <button type="button" class="tile-chip active" data-value="slimPathFloor" aria-pressed="true">slimPathFloor</button>
                 <button type="button" class="tile-chip active" data-value="slimPathHole" aria-pressed="true">slimPathHole</button>
                 <button type="button" class="tile-chip active" data-value="fragileWall" aria-pressed="true">fragileWall</button>
+                <button type="button" class="tile-chip" data-option="placeBoxes" aria-pressed="false">Place Boxes</button>
               </div>
             </div>
             <div class="solver-actions">

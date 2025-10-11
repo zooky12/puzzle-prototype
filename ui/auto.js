@@ -1,6 +1,7 @@
 // ui/auto.js
 import { cloneState } from '../core/state.js';
-import { EntityTypes } from '../core/entities.js';
+import { EntityTypes, isSolid } from '../core/entities.js';
+import { isTrait, getTileTraits } from '../core/tiles.js';
 
 export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
   const runBtn = document.getElementById('runAuto');
@@ -37,7 +38,8 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     });
   });
 
-  document.querySelectorAll('.tile-filter-panel').forEach(panel => {
+  // Only attach chip toggles inside Auto Creator panels to avoid interfering with Build controls
+  document.querySelectorAll('.auto-card .tile-filter-panel').forEach(panel => {
     panel.addEventListener('click', (event) => {
       const chip = event.target.closest('.tile-chip');
       if (!chip) return;
@@ -63,9 +65,20 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
 
     const params = readParams();
     const best = [];
+    const seen = new Set();
+    let duplicateStreak = 0;
+    const maxDuplicateStreak = Math.max(100, params.attempts * 2);
+    let attemptsDone = 0; // counts only unique + valid tile mutation
+    let tries = 0;        // total generation tries (including skipped)
+    const hardCap = Math.max(1000, params.attempts * 50);
 
-    for (let i = 0; i < params.attempts && !cancel; i++) {
-      progressEl.textContent = `Attempt ${i + 1}/${params.attempts}`;
+    while (attemptsDone < params.attempts && !cancel) {
+      tries++;
+      if (tries > hardCap) {
+        progressEl.textContent = 'Search limit reached (too many invalid/duplicate tries)';
+        break;
+      }
+      progressEl.textContent = `Attempt ${attemptsDone + 1}/${params.attempts}`;
       await tick();
 
       const base = getState();
@@ -73,8 +86,27 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
 
       ensurePlayer(candidate);
 
-      const ok = mutateTiles(candidate, params.maxTilesChanged, params.tilesChange, params.tilesPlace);
-      if (!ok) continue;
+      const okTiles = mutateTiles(candidate, params.maxTilesChanged, params.tilesChange, params.tilesPlace);
+      const okEnts  = mutateEntities(candidate, {
+        movePlayer: !!params.movePlayer,
+        placeBoxes: !!params.placeBoxes,
+        removeBoxes: !!params.removeBoxes,
+      });
+      if (!(okTiles || okEnts)) continue; // neither tiles nor entities changed -> does not count as attempt
+
+      // Deduplicate candidates by a stable key
+      const key = stateKey(candidate);
+      if (seen.has(key)) {
+        duplicateStreak++;
+        if (duplicateStreak >= maxDuplicateStreak) {
+          progressEl.textContent = 'Exhausted unique candidates (no new uniques found)';
+          break;
+        }
+        continue; // duplicate -> does not count as attempt
+      }
+      seen.add(key);
+      duplicateStreak = 0;
+      attemptsDone++; // count only when we have a unique, valid candidate
 
       const result = await runSolver(candidate, {
         maxDepth: params.maxDepth,
@@ -92,6 +124,9 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       if (fastest < params.minFastestSteps) continue;
       if (deadEnds.length < params.minDeadEnds) continue;
 
+      // Try to simplify newly changed tiles while preserving solver outputs
+      await simplifyTilesPreservingResult({ base, candidate, params, runSolver, prevResult: { solutions, deadEnds } });
+
       const score = [solutions.length, -deadEnds.length, -fastest];
       best.push({ state: cloneState(candidate), solutions, deadEnds, fastest, score });
       best.sort((a, b) => a.score[0] - b.score[0] || a.score[1] - b.score[1] || a.score[2] - b.score[2]);
@@ -99,7 +134,12 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       renderList(best, listEl, onPlaySolution, setState);
     }
 
-    progressEl.textContent = cancel ? 'Canceled' : `Done. candidates: ${best.length}`;
+    const doneMsg = cancel
+      ? 'Canceled'
+      : (duplicateStreak >= maxDuplicateStreak
+          ? `Done. candidates: ${best.length} (unique space exhausted)`
+          : `Done. candidates: ${best.length}`);
+    progressEl.textContent = doneMsg;
     runBtn.disabled = false;
     stopBtn.disabled = true;
   });
@@ -115,9 +155,19 @@ function readParams() {
   const getSelectedValues = (panelId) => {
     const panel = document.getElementById(panelId);
     if (!panel) return null;
-    const selected = Array.from(panel.querySelectorAll('.tile-chip.active'))
+    const selected = Array.from(panel.querySelectorAll('.tile-chip.active[data-value]'))
       .map(btn => btn.dataset.value);
     return selected.length ? selected : null;
+  };
+  const isOptionSelected = (panelId, optionName) => {
+    const panel = document.getElementById(panelId);
+    if (!panel) return false;
+    return !!panel.querySelector(`.tile-chip.active[data-option="${optionName}"]`);
+  };
+  const getToggle = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    return el.classList.contains('active') || el.getAttribute('aria-pressed') === 'true';
   };
 
   return {
@@ -130,6 +180,9 @@ function readParams() {
     tilesPlace: getSelectedValues('autoTilesPlace'),
     maxDepth: getNum('solverMaxDepth', 100, 1),
     maxNodes: getNum('solverMaxNodes', 200000, 100)
+    , movePlayer: getToggle('autoMovePlayer')
+    , placeBoxes: isOptionSelected('autoTilesPlace', 'placeBoxes')
+    , removeBoxes: isOptionSelected('autoTilesChange', 'removeBoxes')
   };
 }
 
@@ -194,12 +247,88 @@ function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
     if (changes >= maxChanges) break;
     const cur = state.base[y][x] || 'floor';
     if (!sourceSet.has(cur)) continue;
-    const pick = randomOther(targets, cur);
-    if (!pick) continue;
+    // If there is a box/heavyBox at this cell, only choose tiles that support boxes
+    const boxAt = state.entities?.some(e => (e.type === EntityTypes.box || e.type === EntityTypes.heavyBox) && e.x === x && e.y === y);
+    const candidateTargets = targets.filter(t => t !== cur && (!boxAt || allowsBoxTile(t)));
+    if (!candidateTargets.length) continue;
+    const pick = candidateTargets[Math.floor(Math.random() * candidateTargets.length)];
+    if (!pick) continue; // safety
     state.base[y][x] = pick;
     changes++;
   }
   return changes > 0;
+}
+
+// Randomly move player and place/move boxes/heavyBoxes (one lightweight op per attempt)
+function mutateEntities(state, opts = {}) {
+  let changed = false;
+
+  // Helpers
+  const tileAt = (x, y) => (state.base[y][x] || 'floor');
+  const solidAt = (x, y) => state.entities?.some(e => isSolid(e) && e.x === x && e.y === y);
+
+  // 1) Maybe move player
+  const playerIdx = state.entities.findIndex(e => e.type === EntityTypes.player);
+  if (opts.movePlayer && playerIdx >= 0 && Math.random() < 0.5) {
+    const p = state.entities[playerIdx];
+    const options = [];
+    for (let y = 0; y < state.size.rows; y++) {
+      for (let x = 0; x < state.size.cols; x++) {
+        const t = tileAt(x, y);
+        if (isTrait(t, 'isWallForPlayer')) continue;
+        if (isTrait(t, 'isHoleForPlayer')) continue;
+        if (solidAt(x, y) && !(x === p.x && y === p.y)) continue;
+        options.push({ x, y });
+      }
+    }
+    if (options.length) {
+      const spot = options[Math.floor(Math.random() * options.length)];
+      if (spot.x !== p.x || spot.y !== p.y) {
+        p.x = spot.x; p.y = spot.y;
+        p.state = { mode: 'free', entryDir: { dx: 0, dy: 0 } };
+        changed = true;
+      }
+    }
+  }
+
+  // 2) Box operation: add or move one box/heavyBox
+  if (opts.placeBoxes || opts.removeBoxes) {
+    // decide which op to do this attempt
+    const ops = [];
+    if (opts.placeBoxes) ops.push('add');
+    if (opts.removeBoxes) ops.push('remove');
+    const pickOp = ops.length ? ops[Math.floor(Math.random() * ops.length)] : null;
+    const boxCells = [];
+    for (let y = 0; y < state.size.rows; y++) {
+      for (let x = 0; x < state.size.cols; x++) {
+        const t = tileAt(x, y);
+        if (!allowsBoxTile(t)) continue;
+        if (solidAt(x, y)) continue;
+        boxCells.push({ x, y });
+      }
+    }
+
+    if (pickOp === 'add') {
+      if (boxCells.length) {
+        const { x, y } = boxCells[Math.floor(Math.random() * boxCells.length)];
+        const type = Math.random() < 0.5 ? EntityTypes.box : EntityTypes.heavyBox;
+        state.entities.push({ type, x, y });
+        changed = true;
+      }
+    } else if (pickOp === 'remove') {
+      const indices = state.entities
+        .map((e, i) => ({ e, i }))
+        .filter(it => it.e.type === EntityTypes.box || it.e.type === EntityTypes.heavyBox)
+        .map(it => it.i);
+      if (indices.length) {
+        const idx = indices[Math.floor(Math.random() * indices.length)];
+        state.entities.splice(idx, 1);
+        changed = true;
+      }
+    }
+  }
+
+  return changed;
 }
 
 function randomOther(list, current) {
@@ -215,4 +344,119 @@ function shuffle(arr) {
   }
 }
 
+// A tile supports boxes if it is not a wall-for-box nor a hole-for-box
+function allowsBoxTile(tileType) {
+  return !isTrait(tileType, 'isWallForBox') && !isTrait(tileType, 'isHoleForBox');
+}
+
+// Build a stable, compact key for a candidate state to detect duplicates
+function stateKey(s) {
+  // Include base grid and a normalized list of entities (type,x,y)
+  const ents = (s.entities || [])
+    .map(e => ({ t: e.type, x: e.x, y: e.y }))
+    .sort((a, b) => (a.t > b.t ? 1 : a.t < b.t ? -1 : a.x - b.x || a.y - b.y));
+  // JSON stringify is acceptable here; for large grids this is still fine in UI context
+  return JSON.stringify({ base: s.base, ents });
+}
+
+// Attempt to replace newly changed tiles with simpler ones while keeping solver outputs identical
+async function simplifyTilesPreservingResult({ base, candidate, params, runSolver, prevResult }) {
+  const origSig = solverSignature(prevResult);
+  const rows = candidate.size.rows;
+  const cols = candidate.size.cols;
+
+  // Find positions where candidate differs from base
+  const diffs = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const a = (base.base[y][x] || 'floor');
+      const b = (candidate.base[y][x] || 'floor');
+      if (a !== b) diffs.push({ x, y });
+    }
+  }
+
+  let currentSig = origSig;
+
+  for (const { x, y } of diffs) {
+    let curType = candidate.base[y][x] || 'floor';
+    while (true) {
+      const simplerOptions = ALL_TILES
+        .filter(t => t !== curType && isSimplerTile(t, curType))
+        .sort((t1, t2) => traitCount(t1) - traitCount(t2));
+      if (!simplerOptions.length) break;
+
+      // If a box/heavyBox is at this cell, keep only box-legal tiles
+      const hasBox = candidate.entities?.some(e => (e.type === EntityTypes.box || e.type === EntityTypes.heavyBox) && e.x === x && e.y === y);
+      const options = simplerOptions.filter(t => !hasBox || allowsBoxTile(t));
+      if (!options.length) break;
+
+      let applied = false;
+      for (const t of options) {
+        const prev = curType;
+        candidate.base[y][x] = t;
+        const test = await runSolver(candidate, {
+          maxDepth: params.maxDepth,
+          maxNodes: params.maxNodes,
+          maxSolutions: Math.max(params.maxSolutions, 1),
+          onProgress: () => {}
+        });
+        const testSig = solverSignature(test);
+        if (sameSignature(currentSig, testSig)) {
+          // accept and continue trying to simplify further
+          curType = t;
+          currentSig = testSig; // unchanged by definition, but keep consistent
+          applied = true;
+          break;
+        } else {
+          // revert
+          candidate.base[y][x] = prev;
+        }
+      }
+      if (!applied) break; // cannot simplify further at this cell
+    }
+  }
+}
+
+function traitKeys(tileType) {
+  const t = getTileTraits(tileType) || {};
+  return Object.keys(t).filter(k => k !== 'name' && t[k] === true);
+}
+
+function traitCount(tileType) { return traitKeys(tileType).length; }
+
+function isSimplerTile(candidateTile, originalTile) {
+  const a = new Set(traitKeys(candidateTile));
+  const b = new Set(traitKeys(originalTile));
+  if (a.size >= b.size) return false;
+  for (const k of a) if (!b.has(k)) return false;
+  return true;
+}
+
+function solverSignature(result) {
+  const sols = Array.isArray(result?.solutions) ? result.solutions : [];
+  const deads = Array.isArray(result?.deadEnds) ? result.deadEnds : [];
+  const norm = arr => arr.map(s => `${s.moves || ''}|${s.length || 0}`).sort();
+  return { s: norm(sols), d: norm(deads) };
+}
+
+function sameSignature(a, b) {
+  if (!a || !b) return false;
+  if (a.s.length !== b.s.length || a.d.length !== b.d.length) return false;
+  for (let i = 0; i < a.s.length; i++) if (a.s[i] !== b.s[i]) return false;
+  for (let i = 0; i < a.d.length; i++) if (a.d[i] !== b.d[i]) return false;
+  return true;
+}
+
 function tick() { return new Promise(r => setTimeout(r, 0)); }
+  // Toggle buttons for entity mutations
+  const movePlayerBtn = document.getElementById('autoMovePlayer');
+  const placeBoxesBtn = document.getElementById('autoPlaceBoxes');
+  const removeBoxesBtn = document.getElementById('autoRemoveBoxes');
+
+  [movePlayerBtn, placeBoxesBtn, removeBoxesBtn].forEach(btn => {
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const on = btn.classList.toggle('active');
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  });

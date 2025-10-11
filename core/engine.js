@@ -88,15 +88,33 @@ function breakFragileIfNeeded(state, x, y, effects) {
   effects.push(effectTileChanged({x,y}, fromTile, under));
 }
 
+function breakFragileTileIfNeeded(state, x, y, effects) {
+  const t = tileAt(state, x, y);
+  if (!isTrait(t,'isFragile')) return;
+  const fromTile = t;
+  const toTile = 'floor';
+  state.base[y][x] = toTile;
+  effects.push(effectTileChanged({x,y}, fromTile, toTile));
+}
+
 function resolveFlight(state, px, py, fdx, fdy, effects) {
   let cx = px, cy = py;
   while (true) {
     const nx = cx + fdx, ny = cy + fdy;
     if (!inBounds(state, nx, ny)) return { x:cx, y:cy, mode:'free' };
-    const nT = tileAt(state, nx, ny);
 
-    // trencar fràgil
-    if (isTrait(nT,'isFragile')) breakFragileIfNeeded(state, nx, ny, effects);
+    // If next cell is fragile (entity or tile), break it and STOP at previous cell
+    const nTPre = tileAt(state, nx, ny);
+    const hasFragileEnt = firstEntityAt(state, nx, ny, (e)=> e.type === EntityTypes.fragileWall);
+    const hasFragileTile = isTrait(nTPre, 'isFragile');
+    if (hasFragileEnt || hasFragileTile) {
+      breakFragileIfNeeded(state, nx, ny, effects);
+      breakFragileTileIfNeeded(state, nx, ny, effects);
+      return { x:cx, y:cy, mode:'free' };
+    }
+
+    // Re-read tile (no fragile just broken here)
+    const nT = tileAt(state, nx, ny);
 
     if (isTrait(nT,'isNotFly')) return { x:cx, y:cy, mode:'free' };
 
@@ -143,6 +161,9 @@ export function stepMove(state, { dx, dy }) {
       effects.push(effectEntityMoved({type:'player'}, from, to));
       return { newState:s, effects, changed:true };
     } else {
+      // block on solid entities (e.g., fragile wall entity)
+      const solidFront = firstEntityAt(s, target.x, target.y, isSolid);
+      if (solidFront) return { newState:s, effects, changed:false };
       // mou lliure
       const from = { x:px, y:py }, to = { x:target.x, y:target.y };
       player.x = to.x; player.y = to.y;
@@ -160,8 +181,15 @@ export function stepMove(state, { dx, dy }) {
     return { newState:s, effects, changed:false };
   }
 
-  // REVERS - flight
-  if (!isZeroDir(player.state.entryDir) && dx === -player.state.entryDir.dx && dy === -player.state.entryDir.dy && !isTrait(targetTile,'isWallForPlayer')) {
+  // REVERS - flight (only if there is space: next tile is not a wall and not a solid entity)
+  const solidFrontForFlight = firstEntityAt(s, target.x, target.y, isSolid);
+  if (
+    !isZeroDir(player.state.entryDir) &&
+    dx === -player.state.entryDir.dx &&
+    dy === -player.state.entryDir.dy &&
+    !isTrait(targetTile,'isWallForPlayer') &&
+    !solidFrontForFlight
+  ) {
     const res = resolveFlight(s, px, py, dx, dy, effects);
     player.x = res.x; player.y = res.y;
     player.state = res.mode==='inbox' ? { mode:'inbox', entryDir:res.entryDir } : { mode:'free', entryDir:{dx:0,dy:0} };
@@ -174,7 +202,7 @@ export function stepMove(state, { dx, dy }) {
   const sameAsEntry = isSameDir({dx,dy}, player.state.entryDir);
   const entryZero = isZeroDir(player.state.entryDir);
 
-  const blockedForBox = isTrait(targetTile,'isWallForBox');
+  const blockedForBox = isBlockedForBox(s, target.x, target.y);
   const frontPushable = firstEntityAt(s, target.x, target.y, isPushable);
 
   if (isHeavy) {

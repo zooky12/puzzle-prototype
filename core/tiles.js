@@ -19,6 +19,9 @@ export const TileRegistry = {
   slimPathFloor: { name:'slimPathFloor', isWallForBox:true },
 
   slimPathHole: { name:'slimPathHole', isWallForBox:true, isHoleForPlayer:true },
+
+  // Fragile wall as a tile: blocks player and boxes like a wall, but is breakable when flying
+  fragileWall: { name:'fragileWall', isWallForPlayer:true, isWallForBox:true, isFragile:true }
 };
 
 export function getTileTraits(type) {
