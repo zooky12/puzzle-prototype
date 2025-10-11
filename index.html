@@ -189,11 +189,22 @@
       display:flex;
       gap:12px;
       align-items:center;
+      white-space:nowrap;
     }
     .solutionItem .solutionText { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; min-width:0; }
     .solutionItem .solutionActions { display:flex; gap:8px; }
     .solutionItem button { margin-left:0; background: rgba(62,123,255,0.25); border-color: rgba(62,123,255,0.4); }
     .solutionItem button:hover { background: rgba(62,123,255,0.45); }
+    .solutionItem.deadHeader {
+      background: rgba(36, 52, 90, 0.45);
+      border-color: rgba(120, 150, 255, 0.35);
+      font-weight:600;
+    }
+    .solutionItem.deadItem {
+      background: rgba(20, 26, 44, 0.55);
+      border-style: dashed;
+      border-color: rgba(255, 255, 255, 0.12);
+    }
     .hidden { display:none !important; }
     #build-mode-btn.active,
     .build-controls button.active,
@@ -373,7 +384,7 @@
     import { loadLevelList, loadLevel, exportLevel, importLevel } from './ui/io.js';
     import { stepMove } from './core/engine.js';
     import { isWinningState, isLosingState } from './core/goals.js';
-    import { runSolver } from './solver/solver.js';
+    import { runSolver, cancelSolver } from './solver/solver.js';
 
     // Globals (minimum for the UI)
     let state = createEmptyState(12, 12);
@@ -506,9 +517,9 @@
       },
       onRunSolver: async ({ maxDepth, maxNodes, maxSolutions, onProgress, onSolutions }) => {
         const result = await runSolver(state, { maxDepth, maxNodes, maxSolutions, onProgress });
-        onSolutions(result.solutions || []);
+        onSolutions(result || { solutions: [], deadEnds: [], stats: {} });
       },
-      onStopSolver: () => {},
+      onStopSolver: () => { cancelSolver(); },
       onPlaySolution: async (moves) => {
         if (!savedSnapshot) return alert('No saved snapshot. Enter Build mode and exit to take one.');
         state = cloneState(savedSnapshot);
