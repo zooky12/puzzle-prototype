@@ -161,7 +161,7 @@ export function stepMove(state, { dx, dy }) {
   }
 
   // REVERS - flight
-  if (dx === -player.state.entryDir.dx && dy === -player.state.entryDir.dy && !isTrait(targetTile,'isWallForPlayer')) {
+  if (!isZeroDir(player.state.entryDir) && dx === -player.state.entryDir.dx && dy === -player.state.entryDir.dy && !isTrait(targetTile,'isWallForPlayer')) {
     const res = resolveFlight(s, px, py, dx, dy, effects);
     player.x = res.x; player.y = res.y;
     player.state = res.mode==='inbox' ? { mode:'inbox', entryDir:res.entryDir } : { mode:'free', entryDir:{dx:0,dy:0} };
@@ -180,6 +180,7 @@ export function stepMove(state, { dx, dy }) {
   if (isHeavy) {
     // Cas A: mateix sentit que entryDir (i entry != 0)
     if (sameAsEntry) {
+      if (blockedForBox) return { newState:s, effects, changed:false };
       if (frontPushable) {
         // EXCEPCIÓ especial: si hi ha caixa al davant -> comportament normal push chain (sense neutralitzar)
         const plan = planPushChain(s, target.x, target.y, dx, dy);
@@ -239,7 +240,34 @@ export function stepMove(state, { dx, dy }) {
 
     // Cas B: entryDir == (0,0) -> el següent moviment defineix oposat
     if (entryZero) {
-      if (blockedForBox || frontPushable) return { newState:s, effects, changed:false };
+      if (blockedForBox) return { newState:s, effects, changed:false };
+
+      if (frontPushable) {
+        const plan = planPushChain(s, target.x, target.y, dx, dy);
+        if (!plan.ok) return { newState:s, effects, changed:false };
+
+        if (plan.endIsHole) {
+          const last = plan.chain[plan.chain.length - 1];
+          const lastFrom = { x:last.x, y:last.y };
+          removeEntityAt(s, last.x, last.y, (e)=>e===last);
+          effects.push(effectBoxFell({x:lastFrom.x + dx, y:lastFrom.y + dy}));
+          const before = plan.chain.slice(0, -1);
+          effects.push(...applyPushChain(s, before, dx, dy));
+        } else {
+          effects.push(...applyPushChain(s, plan.chain, dx, dy));
+        }
+
+        const fromHb = {x:px,y:py}, toHb = {x:px+dx, y:py+dy};
+        moveEntity(s, under, toHb.x, toHb.y);
+        effects.push(effectEntityMoved(under, fromHb, toHb));
+
+        const pFrom = {x:px,y:py}, pTo = {x:toHb.x,y:toHb.y};
+        player.x = pTo.x; player.y = pTo.y;
+        player.state.entryDir = { dx:-dx, dy:-dy };
+        effects.push(effectEntityMoved({type:'player'}, pFrom, pTo));
+        return { newState:s, effects, changed:true };
+      }
+
       // estableix entryDir a l’oposat d’aquest moviment
       player.state.entryDir = { dx:-dx, dy:-dy };
       if (isTrait(targetTile,'isHoleForBox')) {

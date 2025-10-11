@@ -2,6 +2,8 @@
 import { cloneState } from '../core/state.js';
 import { EntityTypes } from '../core/entities.js';
 
+const pushableTypes = new Set([EntityTypes.box, EntityTypes.heavyBox]);
+
 export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnapshot, requestRedraw, isBuildMode }) {
   let currentPaintTile = 'wall';
   let currentEntityType = null;
@@ -58,15 +60,22 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
 
   function toggleEntity(s, x, y, type) {
     const idx = s.entities.findIndex(e => e.x===x && e.y===y && e.type===type);
-    if (idx>=0) s.entities.splice(idx,1);
-    else {
-      if (type === EntityTypes.player) {
-        s.entities = s.entities.filter(e=>e.type!==EntityTypes.player);
-        s.entities.push({ type, x, y, state:{ mode:'free', entryDir:{dx:0,dy:0} } });
-      } else {
-        s.entities.push({ type, x, y });
-      }
+    if (idx>=0) {
+      s.entities.splice(idx,1);
+      return;
     }
+
+    if (type === EntityTypes.player) {
+      s.entities = s.entities.filter(e=>e.type!==EntityTypes.player);
+      s.entities.push({ type, x, y, state:{ mode:'free', entryDir:{dx:0,dy:0} } });
+      return;
+    }
+
+    if (pushableTypes.has(type)) {
+      s.entities = s.entities.filter(e => !(e.x===x && e.y===y && pushableTypes.has(e.type)));
+    }
+
+    s.entities.push({ type, x, y });
   }
 
   function paintAt(e){
