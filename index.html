@@ -173,6 +173,9 @@
     .size-grid { display:grid; gap:8px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .size-controls button { font-size:12px; padding:6px 10px; }
     .size-compact { align-self:flex-start; }
+    .dir-pad { margin-top:10px; display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:8px; align-items:center; justify-items:center; }
+    .dir-pad > button { width:100%; }
+    .dir-pad .center { height:32px; }
     input[type="file"] { display:none; }
     .build-card.active { border-color: var(--highlight-border); box-shadow: 0 22px 55px rgba(62, 123, 255, 0.35); }
     #build-mode-btn { align-self:flex-start; padding:10px 18px; font-weight:600; }
@@ -313,6 +316,20 @@
           <button id="reset-btn">Reset (R)</button>
           <button id="undo-btn">Undo (E)</button>
         </div>
+        <div class="card levels-card">
+          <h2 class="card-title">Level Library</h2>
+          <div class="levels-row">
+            <label for="server-levels">Levels
+              <select id="server-levels"></select>
+            </label>
+            <button id="load-server">Load</button>
+            <button id="refresh-server">Refresh</button>
+            <button id="import-btn">Import JSON</button>
+            <input type="file" id="import-file" style="display:none" />
+            <input id="export-name" type="text" placeholder="level.json" style="max-width:200px" />
+            <button id="export-btn">Export JSON</button>
+          </div>
+        </div>
         <details class="info-panel">
           <summary>Game Basics <span>movement &middot; goals &middot; hazards</span></summary>
           <div class="info-content">
@@ -377,17 +394,7 @@
       </section>
 
       <section class="control-stack">
-        <div class="card levels-card">
-          <h2 class="card-title">Level Library</h2>
-          <div class="levels-row">
-            <label for="server-levels">Levels
-              <select id="server-levels"></select>
-            </label>
-            <button id="load-server">Load</button>
-            <button id="refresh-server">Refresh</button>
-            <button id="import-btn">Import JSON</button>
-          </div>
-        </div>
+        
 
           <div class="card build-card">
           <div class="solver-header">
@@ -430,26 +437,22 @@
               </div>
             </div>
             <div class="build-actions">
-              <button id="export-btn">Export JSON</button>
               <button id="clear-btn">Clear</button>
               <button id="fill-floor">Fill Floor</button>
               <input type="file" id="import-file">
             </div>
             <div class="size-controls">
               <div class="section-label">Resize Grid</div>
-              <div class="size-grid">
-                <button id="add-row-top">+ Row Top</button>
-                <button id="remove-row-top">- Row Top</button>
-                <button id="add-row-bottom">+ Row Bottom</button>
-                <button id="remove-row-bottom">- Row Bottom</button>
+              <div class="levels-row">
+                <button id="compact-grid" class="size-compact">Compact Borders</button>
+                <button id="resize-add" aria-pressed="false">Add</button>
+                <button id="resize-remove" aria-pressed="false">Remove</button>
               </div>
-              <div class="size-grid">
-                <button id="add-col-left">+ Col Left</button>
-                <button id="remove-col-left">- Col Left</button>
-                <button id="add-col-right">+ Col Right</button>
-                <button id="remove-col-right">- Col Right</button>
+              <div class="dir-pad hidden" id="dir-pad" aria-hidden="true">
+                <div></div><button id="dir-up">Up</button><div></div>
+                <button id="dir-left">Left</button><div class="center"></div><button id="dir-right">Right</button>
+                <div></div><button id="dir-down">Down</button><div></div>
               </div>
-              <button id="compact-grid" class="size-compact">Compact Borders</button>
             </div>
           </div>
         </div>
@@ -633,7 +636,11 @@
         buildControls.classList.toggle('hidden', !buildMode);
         buildControls.setAttribute('aria-hidden', buildMode ? 'false' : 'true');
         playControls.classList.toggle('hidden', buildMode);
-        buildControls.querySelectorAll('button, input, select').forEach(el => { el.disabled = !buildMode; });
+        buildControls.querySelectorAll('button, input, select').forEach(el => {
+          const id = el.id || '';
+          if (id === 'import-file' || id === 'import-btn' || id === 'export-btn') return; // keep import/export usable
+          el.disabled = !buildMode;
+        });
 
         buildBtn.classList.toggle('active', buildMode);
         buildBtn.setAttribute('aria-pressed', buildMode ? 'true' : 'false');
@@ -686,7 +693,7 @@
           alert('Failed to load: ' + err.message);
         }
       },
-      onExport: () => exportLevel(state),
+      onExport: (name) => exportLevel(state, name),
       onImport: async (file) => {
         try {
           state = await importLevel(file);
@@ -748,7 +755,11 @@
 
     const buildControls = document.querySelector('.build-controls');
     if (buildControls) {
-      buildControls.querySelectorAll('button, input, select').forEach(el => { el.disabled = true; });
+      buildControls.querySelectorAll('button, input, select').forEach(el => {
+        const id = el.id || '';
+        if (id === 'import-file' || id === 'import-btn' || id === 'export-btn') return;
+        el.disabled = true;
+      });
     }
 
     // Build mode painting helpers

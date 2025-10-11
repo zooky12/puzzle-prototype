@@ -230,8 +230,47 @@ export function draw(state) {
     const color = entity.type === EntityTypes.box
       ? colors.box
       : (entity.type === EntityTypes.heavyBox ? colors.heavyBox : colors.fragile);
+    const ex = entity.x * tileSize + 4;
+    const ey = entity.y * tileSize + 4;
+    const ew = tileSize - 8;
+    const eh = tileSize - 8;
     ctx.fillStyle = color;
-    ctx.fillRect(entity.x * tileSize + 4, entity.y * tileSize + 4, tileSize - 8, tileSize - 8);
+    ctx.fillRect(ex, ey, ew, eh);
+
+    // Fragile wall entity: draw crack overlay to differentiate from normal walls
+    if (entity.type === EntityTypes.fragileWall) {
+      ctx.save();
+      ctx.translate(entity.x * tileSize, entity.y * tileSize);
+      ctx.strokeStyle = 'rgba(30, 30, 30, 0.9)';
+      ctx.lineWidth = Math.max(2, Math.floor(tileSize * 0.08));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const inset = tileSize * 0.18;
+      const crack = [
+        { x: inset, y: tileSize * 0.35 },
+        { x: inset + tileSize * 0.08, y: tileSize * 0.48 },
+        { x: inset + tileSize * 0.22, y: tileSize * 0.28 },
+        { x: inset + tileSize * 0.38, y: tileSize * 0.54 },
+        { x: inset + tileSize * 0.55, y: tileSize * 0.26 },
+        { x: inset + tileSize * 0.74, y: tileSize * 0.58 },
+        { x: tileSize - inset, y: tileSize * 0.33 }
+      ];
+      ctx.beginPath();
+      ctx.moveTo(crack[0].x, crack[0].y);
+      for (let i = 1; i < crack.length; i++) ctx.lineTo(crack[i].x, crack[i].y);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+      ctx.lineWidth = Math.max(1, Math.floor(tileSize * 0.035));
+      ctx.beginPath();
+      ctx.moveTo(crack[0].x, crack[0].y - Math.max(1, Math.floor(tileSize * 0.02)));
+      for (let i = 1; i < crack.length; i++) {
+        const p = crack[i];
+        ctx.lineTo(p.x, p.y - Math.max(1, Math.floor(tileSize * 0.02)));
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   if (!player) return;

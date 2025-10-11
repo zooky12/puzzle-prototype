@@ -116,30 +116,70 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
   canvasEl.addEventListener('mouseup', ()=> mouseDown=false);
   canvasEl.addEventListener('mouseleave', ()=> mouseDown=false);
 
-  const sizeButtons = [
-    { id:'add-row-top', handler: (s) => addRow(s, 'top') },
-    { id:'add-row-bottom', handler: (s) => addRow(s, 'bottom') },
-    { id:'remove-row-top', handler: (s) => removeRow(s, 'top') },
-    { id:'remove-row-bottom', handler: (s) => removeRow(s, 'bottom') },
-    { id:'add-col-left', handler: (s) => addColumn(s, 'left') },
-    { id:'add-col-right', handler: (s) => addColumn(s, 'right') },
-    { id:'remove-col-left', handler: (s) => removeColumn(s, 'left') },
-    { id:'remove-col-right', handler: (s) => removeColumn(s, 'right') },
-    { id:'compact-grid', handler: (s) => compactState(s) }
-  ];
+  function applyResize(handler) {
+    if (!isBuildMode()) return;
+    const current = getState();
+    const next = handler(current);
+    if (!next || next.size.cols < 1 || next.size.rows < 1) return;
+    onSnapshot();
+    setState(next);
+    onModified();
+    requestRedraw();
+  }
 
-  sizeButtons.forEach(({ id, handler }) => {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      if (!isBuildMode()) return;
-      const current = getState();
-      const next = handler(current);
-      if (!next || next.size.cols < 1 || next.size.rows < 1) return;
-      onSnapshot();
-      setState(next);
-      onModified();
-      requestRedraw();
-    });
-  });
+  const compactBtn = document.getElementById('compact-grid');
+  if (compactBtn) compactBtn.addEventListener('click', () => applyResize((s)=> compactState(s)));
+
+  // Directional resize pad with Add/Remove mode
+  const addToggle = document.getElementById('resize-add');
+  const removeToggle = document.getElementById('resize-remove');
+  const pad = document.getElementById('dir-pad');
+  const dirUp = document.getElementById('dir-up');
+  const dirDown = document.getElementById('dir-down');
+  const dirLeft = document.getElementById('dir-left');
+  const dirRight = document.getElementById('dir-right');
+
+  let currentResizeOp = null; // 'add' | 'remove' | null
+  function updatePad() {
+    if (!pad) return;
+    const show = !!currentResizeOp;
+    pad.classList.toggle('hidden', !show);
+    pad.setAttribute('aria-hidden', show ? 'false' : 'true');
+    if (addToggle) {
+      addToggle.classList.toggle('active', currentResizeOp === 'add');
+      addToggle.setAttribute('aria-pressed', currentResizeOp === 'add' ? 'true' : 'false');
+    }
+    if (removeToggle) {
+      removeToggle.classList.toggle('active', currentResizeOp === 'remove');
+      removeToggle.setAttribute('aria-pressed', currentResizeOp === 'remove' ? 'true' : 'false');
+    }
+  }
+
+  function setResizeOp(op) {
+    currentResizeOp = (currentResizeOp === op ? null : op);
+    updatePad();
+  }
+
+  if (addToggle) addToggle.addEventListener('click', () => { if (isBuildMode()) setResizeOp('add'); });
+  if (removeToggle) removeToggle.addEventListener('click', () => { if (isBuildMode()) setResizeOp('remove'); });
+
+  function doResize(dir) {
+    if (!isBuildMode() || !currentResizeOp) return;
+    if (currentResizeOp === 'add') {
+      if (dir === 'up') return applyResize((s)=> addRow(s, 'top'));
+      if (dir === 'down') return applyResize((s)=> addRow(s, 'bottom'));
+      if (dir === 'left') return applyResize((s)=> addColumn(s, 'left'));
+      if (dir === 'right') return applyResize((s)=> addColumn(s, 'right'));
+    } else if (currentResizeOp === 'remove') {
+      if (dir === 'up') return applyResize((s)=> removeRow(s, 'top'));
+      if (dir === 'down') return applyResize((s)=> removeRow(s, 'bottom'));
+      if (dir === 'left') return applyResize((s)=> removeColumn(s, 'left'));
+      if (dir === 'right') return applyResize((s)=> removeColumn(s, 'right'));
+    }
+  }
+
+  if (dirUp) dirUp.addEventListener('click', () => doResize('up'));
+  if (dirDown) dirDown.addEventListener('click', () => doResize('down'));
+  if (dirLeft) dirLeft.addEventListener('click', () => doResize('left'));
+  if (dirRight) dirRight.addEventListener('click', () => doResize('right'));
 }

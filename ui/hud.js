@@ -14,7 +14,10 @@ export function setupHUD({
   document.getElementById('refresh-server').addEventListener('click', onRefreshLevels);
   document.getElementById('load-server').addEventListener('click', onLoadLevel);
 
-  document.getElementById('export-btn').addEventListener('click', onExport);
+  document.getElementById('export-btn').addEventListener('click', () => {
+    const name = (document.getElementById('export-name')?.value || '').trim();
+    onExport(name);
+  });
   document.getElementById('import-btn').addEventListener('click', () => document.getElementById('import-file').click());
   document.getElementById('import-file').addEventListener('change', (e) => {
     const file = e.target.files[0];

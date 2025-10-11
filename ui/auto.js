@@ -236,14 +236,20 @@ function renderList(list, listEl, onPlaySolution, setState) {
 function ensurePlayer(state) {
   const hasPlayer = state.entities.some(e => e.type === EntityTypes.player);
   if (hasPlayer) return;
-  const floorTiles = [];
+  const canStand = (x, y) => {
+    const t = (state.base[y][x] || 'floor');
+    if (isTrait(t, 'isWallForPlayer') || isTrait(t, 'isHoleForPlayer')) return false;
+    const solidHere = state.entities?.some(e => isSolid(e) && e.x === x && e.y === y);
+    return !solidHere;
+  };
+  const options = [];
   for (let y = 0; y < state.size.rows; y++) {
     for (let x = 0; x < state.size.cols; x++) {
-      if ((state.base[y][x] || 'floor') === 'floor') floorTiles.push({ x, y });
+      if (canStand(x, y)) options.push({ x, y });
     }
   }
-  if (floorTiles.length === 0) return;
-  const spot = floorTiles[Math.floor(Math.random() * floorTiles.length)];
+  if (!options.length) return;
+  const spot = options[Math.floor(Math.random() * options.length)];
   state.entities = state.entities.filter(e => e.type !== EntityTypes.player);
   state.entities.push({ type: EntityTypes.player, x: spot.x, y: spot.y, state: { mode: 'free', entryDir: { dx: 0, dy: 0 } } });
 }

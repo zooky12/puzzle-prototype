@@ -183,12 +183,13 @@ export function stepMove(state, { dx, dy }) {
 
   // REVERS - flight (only if there is space: next tile is not a wall and not a solid entity)
   const solidFrontForFlight = firstEntityAt(s, target.x, target.y, isSolid);
+  const pushableFrontForFlight = firstEntityAt(s, target.x, target.y, isPushable);
   if (
     !isZeroDir(player.state.entryDir) &&
     dx === -player.state.entryDir.dx &&
     dy === -player.state.entryDir.dy &&
     !isTrait(targetTile,'isWallForPlayer') &&
-    !solidFrontForFlight
+    (!solidFrontForFlight || !!pushableFrontForFlight)
   ) {
     const res = resolveFlight(s, px, py, dx, dy, effects);
     player.x = res.x; player.y = res.y;
