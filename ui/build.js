@@ -16,8 +16,9 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
       currentEntityType = null;
       currentPaintTile = b.dataset.tile;
       document.querySelectorAll('.build-controls button[data-tile],.build-controls button[data-entity]')
-        .forEach(btn=> btn.style.outline='');
-      b.style.outline = '2px solid #888';
+        .forEach(btn=> { btn.classList.remove('active'); btn.setAttribute('aria-pressed','false'); });
+      b.classList.add('active');
+      b.setAttribute('aria-pressed','true');
     });
   });
 
@@ -27,8 +28,9 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
       if (!isBuildMode()) return;
       currentEntityType = b.dataset.entity;
       document.querySelectorAll('.build-controls button[data-tile],.build-controls button[data-entity]')
-        .forEach(btn=> btn.style.outline='');
-      b.style.outline = '2px solid #888';
+        .forEach(btn=> { btn.classList.remove('active'); btn.setAttribute('aria-pressed','false'); });
+      b.classList.add('active');
+      b.setAttribute('aria-pressed','true');
     });
   });
 

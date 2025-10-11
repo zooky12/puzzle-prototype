@@ -44,19 +44,27 @@ export function setupHUD({
         solutions.forEach((s, i)=>{
             const div = document.createElement('div');
             div.className = 'solutionItem';
-            div.innerHTML = `<div>#${i+1} len:${s.length} moves: <b>${s.moves}</b></div>`;
+            const text = document.createElement('div');
+            text.className = 'solutionText';
+            text.innerHTML = `#${i+1} len:${s.length} moves: <b>${s.moves}</b>`;
+            div.appendChild(text);
 
             // Botó Play
             const playBtn = document.createElement('button');
             playBtn.textContent = 'Play';
             playBtn.addEventListener('click', ()=> onPlaySolution && onPlaySolution(s.moves));
-            div.appendChild(playBtn);
+            // Contenidor accions a la dreta
+            const actions = document.createElement('div');
+            actions.className = 'solutionActions';
+            actions.appendChild(playBtn);
 
             // Botó Export (opcional)
             const exportBtn = document.createElement('button');
             exportBtn.textContent = 'Export';
             exportBtn.addEventListener('click', ()=> onExportSolution && onExportSolution(s.moves));
-            div.appendChild(exportBtn);
+            actions.appendChild(exportBtn);
+
+            div.appendChild(actions);
 
             solutionsEl.appendChild(div);
         });
