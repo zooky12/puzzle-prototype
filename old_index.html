@@ -1,0 +1,1480 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Box-Enter Puzzle Prototype — Server Levels, Cleaner Icons & Solver</title>
+<style>
+body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; padding:12px; }
+#game { border:1px solid #222; image-rendering: crisp-edges; display:block; margin-bottom:12px;}
+.toolbar { margin-bottom:6px; }
+.toolbar button, .toolbar select, .toolbar input { margin-right:6px; margin-bottom:6px; }
+.status { font-weight:600; margin-bottom:12px; }
+small.hint { color:#666; display:block; margin-top:6px; }
+.hidden { display:none !important; }
+#solverPanel { border:1px solid #ccc; padding:8px; margin-top:8px; background:#fafafa; }
+.solutionItem { font-family: monospace; margin:4px 0; display:flex; gap:8px; align-items:center; }
+.solutionItem button { margin-left:auto; }
+#bigMessage { font-size:26px;font-weight:800;text-align:center;margin-top:12px;min-height:34px; }
+.progress { font-size:13px; color:#333; margin-top:6px; }
+</style>
+</head>
+<body>
+<h3>Box-Enter Puzzle Prototype — Server Levels, Cleaner Icons & Solver</h3>
+<canvas id="game" width="480" height="480"></canvas>
+<div id="bigMessage"></div>
+
+<div class="toolbar">
+  <div>
+    <button id="build-mode-btn">Toggle Build Mode</button>
+    <div style="margin-top:6px;">
+      <label for="server-levels" style="font-size:12px;margin-right:6px;">Levels:</label>
+      <select id="server-levels" style="min-width:220px;"></select>
+      <button id="refresh-server">Refresh</button>
+      <button id="load-server">Load</button>
+    </div>
+  </div>
+
+  <div class="build-controls">
+    <div>
+      <div>
+        <button data-tile="wall">Wall</button>
+        <button data-tile="floor">Floor</button>
+        <button data-tile="hole">Hole</button>
+        <button data-tile="exit">Exit</button>
+      </div>
+      <div>
+        <button data-tile="spikes">Spikes</button>
+        <button data-tile="grile">Grile</button>
+        <button data-tile="fragileWall">Fragile Wall</button>
+        <button data-tile="pressurePlate">Pressure Plate</button>
+        <button data-tile="holeSpikes">Hole Spikes</button>
+        <button data-tile="slimPathFloor">Slim Path Floor</button>
+        <button data-tile="slimPathHole">Slim Path Hole</button>
+      </div>
+      <div>
+        <button data-tile="box">Box</button>
+        <button data-tile="heavyBox">Heavy Box</button>
+        <button data-tile="player">Player</button>
+      </div>
+    </div>
+    <div>
+      <button id="export-btn">Export JSON</button>
+      <button id="import-btn">Import JSON</button>
+      <button id="clear-btn">Clear</button>
+      <button id="fill-floor">Fill Floor</button>
+      <input type="file" id="import-file" style="display:none"/>
+    </div>
+  </div>
+
+  <div class="play-controls" style="margin-top:6px;">
+    <button id="reset-btn">Reset (R)</button>
+    <button id="undo-btn">Undo (E)</button>
+  </div>
+
+  <small class="hint">
+    Build Mode ON: paint/place/remove. Build Mode OFF: play (WASD). Drag to paint tiles. Export/Import levels via JSON.
+  </small>
+</div>
+
+<div class="status" id="status">Build Mode: OFF</div>
+
+<!-- Solver toggle + panel -->
+<div style="margin-top:8px;">
+  <button id="toggleSolver">Toggle Solver Panel</button>
+</div>
+<div id="solverPanel" class="hidden">
+  <div>
+    <label>Max depth: <input id="solverMaxDepth" type="number" value="100" min="1" style="width:80px"/></label>
+    <label>Max nodes: <input id="solverMaxNodes" type="number" value="200000" min="100" style="width:120px"/></label>
+    <label>Max solutions: <input id="solverMaxSolutions" type="number" value="100" min="1" style="width:80px"/></label>
+    <button id="runSolver">Run Solver</button>
+    <button id="stopSolver" disabled>Stop</button>
+    <button id="exportSolutions">Export Solutions</button>
+  </div>
+  <div class="progress" id="solverProgress">Idle</div>
+  <div id="solutionsList"></div>
+</div>
+
+<script>
+/* -------------------- CONFIG & VISUALS -------------------- */
+let rows = 12;
+let cols = 12;
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let tileSize = Math.floor(canvas.width / cols);
+
+const colors = {
+  empty: '#ffffff',
+  wall: '#777777',
+  floor: '#fafafa',
+  hole: '#000000',
+  exitActive: '#3cb371',
+  exitInactive: '#bfecc4',
+  box: '#f39c12',
+  player: '#4c3ce7',
+  heavyBox: '#b76b1e'
+};
+
+/* ---------- BLOCK TYPES (attributes) ---------- */
+const BlockTypes = {
+  floor: {},
+  wall: { isWallForPlayer:true, isWallForBox:true, isNotFly:true },
+  hole: { isHoleForPlayer:true, isHoleForBox:true },
+  exit: { isEnd:true },
+  spikes: { isWallForBox:true, isStickOnFly:true },
+  grile: { isHoleForPlayer:true, isHoleForBox:false },
+  pressurePlate: { requiresBox:true },
+  holeSpikes: { isWallForBox:true, isStickOnFly:true, isHoleForPlayer:true },
+  slimPathFloor: { isWallForBox:true },
+  slimPathHole: { isWallForBox:true, isHoleForPlayer:true },
+  fragileWall: { isFragile:true, isWallForPlayer:true, isWallForBox:true, isNotFly:true }
+};
+
+const blockBgColor = {
+  floor: colors.floor,
+  wall: colors.wall,
+  hole: colors.hole,
+  exit: colors.exitActive,
+  spikes: colors.floor,
+  grile: colors.hole,
+  pressurePlate: colors.floor,
+  holeSpikes: colors.hole,
+  slimPathFloor: colors.floor,
+  slimPathHole: colors.hole,
+  fragileWall: colors.wall
+};
+
+/* -------------------- GAME STATE -------------------- */
+// Unified container for all dynamic entities (movables, breakables, etc.)
+let dynamicElements = {
+  boxes: [],
+  heavyBoxes: [],
+  fragiles: [],
+  player: null
+};
+
+// Legacy aliases for backward compatibility (remove later)
+Object.defineProperty(window, 'boxes', { get: () => dynamicElements.boxes });
+Object.defineProperty(window, 'player', { get: () => dynamicElements.player });
+Object.defineProperty(window, 'fragiles', { get: () => dynamicElements.fragiles });
+
+let base = Array.from({length: rows}, ()=> Array.from({length: cols}, ()=> 'floor'));
+let buildMode = false;
+let selectedTool = 'wall';
+let savedSnapshot = null;
+let undoStack = [];
+let mouseDown = false;
+let gameState = null;
+
+/* falling box animation */
+let fallingAnims = [];
+let animRunning = false;
+
+/* -------------------- DRAW & ICONS -------------------- */
+function animateBoxFall(x, y, duration = 1000){
+  fallingAnims.push({ x, y, start: performance.now(), duration });
+  startAnimLoop();
+}
+function startAnimLoop(){ if(animRunning) return; animRunning = true; requestAnimationFrame(animLoop); }
+function animLoop(){
+  draw();
+  drawFallingAnims(performance.now());
+  if(fallingAnims.length > 0) requestAnimationFrame(animLoop); else animRunning = false;
+}
+function drawFallingAnims(now){
+  if(!fallingAnims.length) return;
+  const next = [];
+  for(const a of fallingAnims){
+    const t = now - a.start;
+    const p = Math.max(0, Math.min(1, t / a.duration));
+    if(p >= 1) continue;
+    const startSize = tileSize - 8;
+    const scale = 1 - 0.75 * p;
+    const size = Math.max(2, Math.floor(startSize * scale));
+    const cx = a.x * tileSize + tileSize/2;
+    const cy = a.y * tileSize + tileSize/2;
+    const alpha = 1 - 0.7 * p;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = colors.box;
+    ctx.fillRect(Math.round(cx - size/2), Math.round(cy - size/2), size, size);
+    ctx.fillStyle = `rgba(0,0,0,${0.4 * p})`;
+    ctx.fillRect(Math.round(cx - size/2), Math.round(cy - size/2), size, size);
+    ctx.restore();
+    next.push(a);
+  }
+  fallingAnims = next;
+}
+
+function computeExitActive(){
+  const plates = [];
+  for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) if(base[y][x] === 'pressurePlate') plates.push({x,y});
+  if(plates.length === 0) return true;
+  let pressed = 0;
+  for(const p of plates){
+    if (boxAt(p.x,p.y)) pressed++;
+    else if (dynamicElements.heavyBoxes.some(h=>h.x===p.x && h.y===p.y)) pressed++; // ADD
+  }
+  return pressed === plates.length;
+}
+
+function drawOverlayForType(t, x, y){
+  const px = x * tileSize, py = y * tileSize;
+  ctx.save();
+  ctx.translate(px, py);
+  if(t === 'spikes' || t === 'holeSpikes'){
+    const count = 5;
+    const spacing = tileSize / (count + 1);
+    const triW = Math.max(4, Math.floor(tileSize * 0.12));
+    const triH = Math.max(6, Math.floor(tileSize * 0.14));
+    ctx.fillStyle = colors.wall;
+    for(let i=1;i<=count;i++){
+      const cx = spacing * i;
+      const topY = tileSize*0.28;
+      ctx.beginPath();
+      ctx.moveTo(cx, topY);
+      ctx.lineTo(cx - triW/2, topY + triH);
+      ctx.lineTo(cx + triW/2, topY + triH);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if(t === 'grile'){
+    ctx.strokeStyle = colors.floor;
+    ctx.lineWidth = Math.max(2, Math.floor(tileSize * 0.12));
+    ctx.lineCap = 'round';
+    const inset = tileSize * 0.18;
+    const x1 = inset, x2 = tileSize - inset;
+    const y1 = inset, y2 = tileSize - inset;
+    ctx.beginPath();
+    ctx.moveTo(x1 + (x2-x1)/3, y1);
+    ctx.lineTo(x1 + (x2-x1)/3, y2);
+    ctx.moveTo(x1 + 2*(x2-x1)/3, y1);
+    ctx.lineTo(x1 + 2*(x2-x1)/3, y2);
+    ctx.moveTo(x1, y1 + (y2-y1)/3);
+    ctx.lineTo(x2, y1 + (y2-y1)/3);
+    ctx.moveTo(x1, y1 + 2*(y2-y1)/3);
+    ctx.lineTo(x2, y1 + 2*(y2-y1)/3);
+    ctx.stroke();
+  } else if(t === 'pressurePlate'){
+    ctx.strokeStyle = '#ff6a00';
+    ctx.lineWidth = Math.max(3, Math.floor(tileSize * 0.14));
+    ctx.lineCap = 'round';
+    const inset = tileSize * 0.22;
+    ctx.beginPath();
+    ctx.moveTo(inset, inset);
+    ctx.lineTo(tileSize - inset, tileSize - inset);
+    ctx.moveTo(tileSize - inset, inset);
+    ctx.lineTo(inset, tileSize - inset);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.lineWidth = Math.max(1, Math.floor(tileSize * 0.04));
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.arc(tileSize/2, tileSize/2, tileSize*0.28, 0, Math.PI*2);
+    ctx.stroke();
+  } else if(t === 'slimPathFloor' || t === 'slimPathHole'){
+    ctx.fillStyle = colors.wall;
+    const dotR = Math.max(1, Math.floor(tileSize * 0.06));
+    const margin = Math.max(2, Math.floor(tileSize * 0.02));
+    const colsCount = 2;
+    for(let i=0;i<colsCount;i++){
+      const xPos = margin + (tileSize - margin*2) * (i/(colsCount-1));
+      ctx.beginPath(); ctx.arc(xPos, margin, dotR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(xPos, tileSize - margin, dotR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(margin, margin + (tileSize - margin*2) * (i/(colsCount-1)), dotR, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(tileSize - margin, margin + (tileSize - margin*2) * (i/(colsCount-1)), dotR, 0, Math.PI*2); ctx.fill();
+    }
+  } else if(t === 'fragileWall'){
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = Math.max(2, Math.floor(tileSize * 0.08));
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'miter';
+    const inset = tileSize * 0.18;
+    const pts = [
+      {x: inset, y: tileSize*0.35},
+      {x: inset + tileSize*0.08, y: tileSize*0.45},
+      {x: inset + tileSize*0.18, y: tileSize*0.3},
+      {x: inset + tileSize*0.32, y: tileSize*0.5},
+      {x: inset + tileSize*0.5, y: tileSize*0.28},
+      {x: inset + tileSize*0.68, y: tileSize*0.6},
+      {x: tileSize - inset - tileSize*0.02, y: tileSize*0.35}
+    ];
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = Math.max(1, Math.floor(tileSize * 0.03));
+    ctx.beginPath();
+    for(let i=0;i<pts.length;i++){
+      const p = pts[i];
+      ctx.lineTo(p.x, p.y - Math.max(1, Math.floor(tileSize*0.02)));
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function draw(){
+  const exitActive = computeExitActive();
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const t = base[y][x] || 'floor';
+      let bg;
+      if(t === 'exit') bg = exitActive ? colors.exitActive : colors.exitInactive;
+      else bg = blockBgColor[t] !== undefined ? blockBgColor[t] : colors.floor;
+      ctx.fillStyle = bg;
+      ctx.fillRect(x*tileSize, y*tileSize, tileSize, tileSize);
+      ctx.strokeStyle = '#ddd';
+      ctx.strokeRect(x*tileSize, y*tileSize, tileSize, tileSize);
+      if(['spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole','fragileWall'].includes(t)) drawOverlayForType(t, x, y);
+    }
+  }
+
+  for(const b of dynamicElements.boxes){
+    if(dynamicElements.player && dynamicElements.player.mode === 'inbox' && dynamicElements.player.x === b.x && dynamicElements.player.y === b.y) continue;
+    ctx.fillStyle = colors.box;
+    ctx.fillRect(b.x*tileSize+4, b.y*tileSize+4, tileSize-8, tileSize-8);
+  }
+  for (const hb of dynamicElements.heavyBoxes){
+    if (dynamicElements.player &&
+        dynamicElements.player.mode === 'inbox' &&
+        dynamicElements.player.x === hb.x && dynamicElements.player.y === hb.y) continue;
+
+    ctx.fillStyle = colors.heavyBox;
+    ctx.fillRect(hb.x*tileSize+4, hb.y*tileSize+4, tileSize-8, tileSize-8);
+  }
+  for (const f of dynamicElements.fragiles) {
+    ctx.fillStyle = colors.wall;
+    const size = tileSize - 10;
+    ctx.fillRect(f.x * tileSize + 5, f.y * tileSize + 5, size, size);
+  }
+
+  if(dynamicElements.player && dynamicElements.player.mode === 'free'){
+    ctx.fillStyle = colors.player;
+    const cx = dynamicElements.player.x*tileSize + tileSize/2;
+    const cy = dynamicElements.player.y*tileSize + tileSize/2;
+    const r = tileSize * 0.32;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
+  }
+
+  if(dynamicElements.player && dynamicElements.player.mode === 'inbox'){
+    const bx = dynamicElements.player.x, by = dynamicElements.player.y;
+    ctx.fillStyle = colors.box;
+    ctx.fillRect(bx*tileSize+4, by*tileSize+4, tileSize-8, tileSize-8);
+    const dx = dynamicElements.player.entryDir.dx, dy = dynamicElements.player.entryDir.dy;
+    ctx.save(); ctx.fillStyle = colors.player;
+    if(dx === 1) ctx.fillRect(bx*tileSize+4, by*tileSize+4, (tileSize-8)/2, tileSize-8);
+    else if(dx === -1) ctx.fillRect(bx*tileSize+4 + (tileSize-8)/2, by*tileSize+4, (tileSize-8)/2, tileSize-8);
+    else if(dy === 1) ctx.fillRect(bx*tileSize+4, by*tileSize+4, tileSize-8, (tileSize-8)/2);
+    else if(dy === -1) ctx.fillRect(bx*tileSize+4, by*tileSize+4 + (tileSize-8)/2, tileSize-8, (tileSize-8)/2);
+    ctx.restore();
+    ctx.strokeStyle = '#333'; ctx.strokeRect(bx*tileSize+4, by*tileSize+4, tileSize-8, tileSize-8);
+  }
+}
+
+/* -------------------- HELPERS -------------------- */
+function cloneDynamic(d) {
+  return {
+    boxes: d.boxes.map(b => ({ x:b.x, y:b.y })),
+    heavyBoxes: d.heavyBoxes.map(h => ({ x:h.x, y:h.y })), // ADD
+    fragiles: d.fragiles.map(f => ({ x:f.x, y:f.y })),
+    player: d.player ? JSON.parse(JSON.stringify(d.player)) : null
+  };
+}
+
+function cloneState() {
+  return {
+    base: base.map(r => r.slice()),
+    dynamic: cloneDynamic(dynamicElements)
+  };
+}
+
+function restoreState(snap) {
+  base = snap.base.map(r => r.slice());
+  dynamicElements = cloneDynamic(snap.dynamic);
+  updateToolbarVisibility();
+  draw();
+}
+function inBounds(x,y){ return x>=0 && x<cols && y>=0 && y<rows; }
+function boxAt(x,y){ return dynamicElements.boxes.find(b=>b.x===x && b.y===y); }
+function removeBoxAt(x,y){ dynamicElements.boxes = dynamicElements.boxes.filter(b=>!(b.x===x && b.y===y)); }
+function addBox(x,y){ if(!boxAt(x,y)) dynamicElements.boxes.push({x,y}); }
+function moveBox(fromX,fromY,toX,toY){ for(let b of dynamicElements.boxes){ if(b.x===fromX && b.y===fromY){ b.x=toX; b.y=toY; return true; } } return false; }
+function heavyBoxAt(x,y){ return dynamicElements.heavyBoxes.find(h => h.x===x && h.y===y); }
+function removeHeavyBoxAt(x,y){ dynamicElements.heavyBoxes = dynamicElements.heavyBoxes.filter(h=>!(h.x===x && h.y===y)); }
+function addHeavyBox(x,y){ if(!heavyBoxAt(x,y)) dynamicElements.heavyBoxes.push({x,y}); }
+function moveHeavyBox(fromX,fromY,toX,toY){ for(let h of dynamicElements.heavyBoxes){ if(h.x===fromX && h.y===fromY){ h.x=toX; h.y=toY; return true; } } return false; }
+function attr(type, key){ if(!type) return false; const def = BlockTypes[type]; if(!def) return false; return !!def[key]; }
+
+/* -------------------- UI HANDLERS -------------------- */
+document.querySelectorAll('.build-controls button[data-tile]').forEach(b=>{
+  b.addEventListener('click', ()=> {
+    selectedTool = b.dataset.tile;
+    document.querySelectorAll('.build-controls button[data-tile]').forEach(btn=> btn.style.outline='');
+    b.style.outline = '2px solid #888';
+  });
+});
+document.querySelector('.build-controls button[data-tile="wall"]').style.outline='2px solid #888';
+
+function updateToolbarVisibility(){
+  const buildControls = document.querySelector('.build-controls');
+  const playControls = document.querySelector('.play-controls');
+  if(buildMode){ buildControls.classList.remove('hidden'); playControls.classList.add('hidden'); }
+  else { buildControls.classList.add('hidden'); playControls.classList.remove('hidden'); }
+  document.getElementById('status').textContent = `Build Mode: ${buildMode ? 'ON' : 'OFF'}`;
+}
+document.getElementById('build-mode-btn').addEventListener('click', ()=>{
+  buildMode = !buildMode;
+  if(!buildMode){
+    savedSnapshot = cloneState();
+    undoStack = [ cloneState() ];
+  }
+  updateToolbarVisibility();
+  draw();
+});
+
+/* ---------- BUILD: click/drag behavior ---------- */
+function handleBuildClick(e){
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left)/tileSize);
+  const y = Math.floor((e.clientY - rect.top)/tileSize);
+  if(!inBounds(x,y)) return;
+
+  if(selectedTool === 'player'){
+    if(dynamicElements.player && dynamicElements.player.x === x && dynamicElements.player.y === y) dynamicElements.player = null;
+    else { dynamicElements.player = { mode: 'free', x, y }; if(!base[y][x]) base[y][x] = 'floor'; }
+    draw(); return;
+  }
+  if(selectedTool === 'box'){
+    const existing = boxAt(x,y);
+    if(existing) removeBoxAt(x,y);
+    else { addBox(x,y); if(!base[y][x]) base[y][x] = 'floor'; }
+    draw(); return;
+  }
+  if (selectedTool === 'heavyBox'){
+    const existing = dynamicElements.heavyBoxes.find(h=>h.x===x && h.y===y);
+    if (existing)
+      dynamicElements.heavyBoxes = dynamicElements.heavyBoxes.filter(h=>!(h.x===x && h.y===y));
+    else {
+      dynamicElements.heavyBoxes.push({x,y});
+      if(!base[y][x]) base[y][x] = 'floor';
+    }
+    draw();
+    return;
+  }
+  if (selectedTool === 'fragileWall') {
+    const existing = dynamicElements.fragiles.find(f => f.x === x && f.y === y);
+    if (existing) dynamicElements.fragiles = dynamicElements.fragiles.filter(f => !(f.x===x && f.y===y));
+    else dynamicElements.fragiles.push({x,y});
+    draw();
+    return;
+  }
+
+  base[y][x] = selectedTool;
+  draw();
+}
+function handleBuildDrag(e){
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left)/tileSize);
+  const y = Math.floor((e.clientY - rect.top)/tileSize);
+  if(!inBounds(x,y)) return;
+  if(['wall','floor','hole','exit','spikes','grile','pressurePlate','holeSpikes','slimPathFloor','slimPathHole','fragileWall'].includes(selectedTool)){
+    base[y][x] = selectedTool;
+    draw();
+  }
+}
+canvas.addEventListener('mousedown', (e)=>{ if(!buildMode) return; mouseDown = true; handleBuildClick(e); });
+canvas.addEventListener('mousemove', (e)=>{ if(!mouseDown || !buildMode) return; handleBuildDrag(e); });
+canvas.addEventListener('mouseup', ()=>{ mouseDown=false; });
+canvas.addEventListener('mouseleave', ()=>{ mouseDown=false; });
+
+/* ---------- SHORTCUTS ---------- */
+window.addEventListener('keydown', (e)=>{
+  const key = e.key.toLowerCase();
+  if(buildMode){
+    if(key === 'e'){ doUndo(); e.preventDefault(); }
+    if(key === 'r'){ resetToSaved(); e.preventDefault(); }
+    return;
+  }
+  let dx=0,dy=0;
+  if(key==='w') dy=-1;
+  else if(key==='s') dy=1;
+  else if(key==='a') dx=-1;
+  else if(key==='d') dx=1;
+  else if(key==='e'){ doUndo(); e.preventDefault(); return; }
+  else if(key==='r'){ resetToSaved(); e.preventDefault(); return; }
+  else return;
+  e.preventDefault();
+  attemptMove(dx,dy);
+});
+
+/* ---------- UI buttons ---------- */
+document.getElementById('fill-floor').addEventListener('click', ()=>{ for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) base[y][x]='floor'; draw(); });
+document.getElementById('clear-btn').addEventListener('click', ()=>{
+  if(!confirm('Clear map? This will remove boxes, player and tiles. Proceed?')) return;
+  base = Array.from({length: rows}, ()=> Array.from({length: cols}, ()=> 'floor'));
+  dynamicElements.boxes = [];dynamicElements.fragiles = []; dynamicElements.player = null; savedSnapshot = null; undoStack = []; buildMode=true; updateToolbarVisibility(); draw();
+  setGameState(null);
+});
+
+/* Reset & Undo */
+function resetToSaved(){
+  if(!savedSnapshot) return;
+  restoreState(savedSnapshot);
+  undoStack = [ cloneState() ];
+  setGameState(null);
+}
+document.getElementById('reset-btn').addEventListener('click', resetToSaved);
+
+function doUndo(){
+  if(undoStack.length <= 1) return;
+  undoStack.pop();
+  const prev = undoStack[undoStack.length - 1];
+  restoreState(prev);
+
+  const snap = cloneState();
+  let terminalLose = false;
+  for(let y=0;y<rows;y++) for(let x=0;x<cols;x++){
+    const t = snap.base[y][x] || 'floor';
+    if (attr(t, 'isHoleForBox')) {
+      if (snap.dynamic.boxes.some(b => b.x===x && b.y===y)) terminalLose = true;
+      if (snap.dynamic.heavyBoxes.some(h => h.x===x && h.y===y)) terminalLose = true; // ADD
+    }
+  }
+
+  if (snap.dynamic.player) {
+    if (snap.dynamic.player.mode === 'free' &&
+        attr(snap.base[snap.dynamic.player.y][snap.dynamic.player.x], 'isHoleForPlayer')) terminalLose = true;
+  }
+  if(terminalLose){ setGameState('lose','Game Over — your box fell into a hole'); return; }
+
+  if (snap.dynamic.player && snap.dynamic.player.mode === 'free') {
+    const t = snap.base[snap.dynamic.player.y][snap.dynamic.player.x] || 'floor';
+    if(attr(t,'isEnd') && computeExitActive()){ setGameState('win','You Win!'); return; }
+  }
+
+  setGameState(null);
+}
+document.getElementById('undo-btn').addEventListener('click', doUndo);
+
+/* ---------- JSON Export/Import (local download) ---------- */
+document.getElementById('export-btn').addEventListener('click', ()=>{
+  if(!dynamicElements.player){ alert('Place a player first'); return; }
+  const levelData = {
+    base,
+    dynamic: dynamicElements,
+    rows,
+    cols
+  };
+  const blob = new Blob([JSON.stringify(levelData, null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='level.json'; a.click(); URL.revokeObjectURL(url);
+});
+document.getElementById('import-btn').addEventListener('click', ()=> document.getElementById('import-file').click());
+document.getElementById('import-file').addEventListener('change', (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    try {
+      const data = JSON.parse(ev.target.result);
+      if (!data.base) throw new Error('Invalid level format');
+
+      if (!data.dynamic) {
+        // Backward compatibility for old format
+        data.dynamic = {
+          boxes: data.boxes || [],
+          heavyBoxes: data.heavyBoxes || [],  // ADD
+          fragiles: data.fragiles || [],
+          player: data.player || null
+        };
+      } else {
+        // Also backfill if a newer JSON forgot the field
+        data.dynamic.heavyBoxes = data.dynamic.heavyBoxes || [];
+      }
+
+      base = data.base.map(r => r.slice());
+      dynamicElements = cloneDynamic(data.dynamic);
+      if(data.rows && data.cols){
+        rows = data.rows; cols = data.cols;
+        tileSize = Math.floor(canvas.width / cols);
+      }
+      savedSnapshot = cloneState();
+      undoStack = [ cloneState() ];
+      updateToolbarVisibility();
+      draw();
+      initZobrist(rows, cols);
+      alert('Level imported successfully');
+    } catch(err){ alert('Failed to import JSON: '+err); }
+  };
+  reader.readAsText(file); e.target.value='';
+});
+
+/* ---------- LEVELS FOLDER (static in repo) ---------- */
+async function refreshLevelsFolderList(){
+  const sel = document.getElementById('server-levels');
+  sel.innerHTML = '';
+  try {
+    const res = await fetch('levels/index.json', { cache: "no-store" });
+    if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    const list = await res.json();
+    if(!Array.isArray(list)) throw new Error('index.json must be an array of filenames');
+    list.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+    if(list.length === 0){
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(no levels found)';
+      sel.appendChild(opt);
+    }
+  } catch(err){
+    console.warn('Could not load levels/index.json:', err);
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(levels/index.json not found)';
+    sel.appendChild(opt);
+  }
+}
+document.getElementById('refresh-server').addEventListener('click', refreshLevelsFolderList);
+document.getElementById('load-server').addEventListener('click', async ()=>{
+  const sel = document.getElementById('server-levels');
+  const name = sel.value;
+  if(!name) return alert('Select a level first (refresh list if needed)');
+  if(!confirm('Load "' + name + '"? Unsaved changes will be lost.')) return;
+  try {
+    const res = await fetch('levels/' + encodeURIComponent(name), { cache: "no-store" });
+    if(!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    const data = await res.json();
+    if (!data.base) throw new Error('Invalid level format');
+    if (!data.dynamic) {
+      data.dynamic = {
+        boxes: data.boxes || [],
+        heavyBoxes: data.heavyBoxes || [],  // ADD
+        fragiles: data.fragiles || [],
+        player: data.player || null
+      };
+    } else {
+      data.dynamic.heavyBoxes = data.dynamic.heavyBoxes || [];
+    }
+    base = data.base.map(r => r.slice());
+    dynamicElements = cloneDynamic(data.dynamic);
+    if(data.rows && data.cols){
+      rows = data.rows; cols = data.cols;
+      tileSize = Math.floor(canvas.width / cols);
+    }
+    savedSnapshot = cloneState();
+    undoStack = [ cloneState() ];
+    updateToolbarVisibility();
+    draw();
+    initZobrist(rows, cols);
+    resetToSaved(); 
+  } catch(err){
+    alert('Failed to load levels/' + name + ': ' + err.message);
+  }
+});
+refreshLevelsFolderList();
+
+/* -------------------- SOLVER-COMPATIBLE MOVE SIM -------------------- */
+/* Solver helpers that operate on a solver-local state copy */
+function cloneStateForSolver(s){
+  return {
+    base: s.base.map(r => r.slice()),
+    dynamic: cloneDynamic(s.dynamic)
+  };
+}
+
+function boxAtState(state, x, y){ return state.dynamic.boxes.find(b => b.x === x && b.y === y) || null; }
+function removeBoxState(state, x, y){ state.dynamic.boxes = state.dynamic.boxes.filter(b => !(b.x===x && b.y===y)); }
+function moveBoxState(state, fromX, fromY, toX, toY){
+  for(let b of state.dynamic.boxes){ if(b.x===fromX && b.y===fromY){ b.x = toX; b.y = toY; return true; } }
+  return false;
+}
+function heavyBoxAtState(state, x, y){
+  return state.dynamic.heavyBoxes.find(h => h.x===x && h.y===y) || null;
+}
+function removeHeavyBoxState(state, x, y){
+  state.dynamic.heavyBoxes = state.dynamic.heavyBoxes.filter(h => !(h.x===x && h.y===y));
+}
+function moveHeavyBoxState(state, fromX, fromY, toX, toY){
+  for (let h of state.dynamic.heavyBoxes){
+    if (h.x===fromX && h.y===fromY){ h.x=toX; h.y=toY; return true; }
+  }
+  return false;
+}
+
+// Unified “any box?” helpers
+function anyBoxAtState(state, x, y){
+  if (boxAtState(state, x, y)) return { type:'box' };
+  if (heavyBoxAtState(state, x, y)) return { type:'heavy' };
+  return null;
+}
+function moveAnyBoxState(state, which, fromX, fromY, toX, toY){
+  if (which==='box')  return moveBoxState(state, fromX, fromY, toX, toY);
+  if (which==='heavy')return moveHeavyBoxState(state, fromX, fromY, toX, toY);
+  return false;
+}
+function removeAnyBoxState(state, which, x, y){
+  if (which==='box')   removeBoxState(state, x, y);
+  else if (which==='heavy') removeHeavyBoxState(state, x, y);
+}
+
+function inBoundsState(state, x, y){ return y>=0 && y<state.base.length && x>=0 && x<state.base[0].length; }
+
+/* Terminal tests for solver */
+function isLosingStateForSolver(state) {
+  if (!state.dynamic.player) return false;
+  const t = state.base[state.dynamic.player.y][state.dynamic.player.x];
+  if (state.dynamic.player.mode === 'free' && BlockTypes[t]?.isHoleForPlayer) return true;
+  if (state.dynamic.player.mode === 'inbox' && BlockTypes[t]?.isHoleForBox) return true;
+
+  return false;
+}
+function computeExitActiveForSolver(state){
+  let plates = [];
+  for(let y=0;y<state.base.length;y++)
+    for(let x=0;x<state.base[0].length;x++)
+      if(state.base[y][x] === 'pressurePlate') plates.push({x,y});
+  if(plates.length === 0) return true;
+  let pressed = 0;
+  for(const p of plates){
+    if (boxAtState(state,p.x,p.y)) pressed++;
+    else if (heavyBoxAtState(state,p.x,p.y)) pressed++; // ADD
+  }
+  return pressed === plates.length;
+}
+
+function isWinningStateForSolver(state){
+  if (!state.dynamic.player || state.dynamic.player.mode !== 'free') return false;
+  const t = state.base[state.dynamic.player.y][state.dynamic.player.x];
+  return !!(BlockTypes[t]?.isEnd) && computeExitActiveForSolver(state);
+}
+
+/* simulateMove: no terminal checks here (caller does it) */
+function simulateMove(origState, dx, dy) {
+  const state = cloneStateForSolver(origState);
+  if (!state.dynamic.player) return { state };
+  let p = state.dynamic.player;
+
+
+  const inB = (x, y) => inBoundsState(state, x, y);
+  const getBlock = (x, y) => state.base[y][x] || 'floor';
+
+  const resolveFlight = (px, py, fdx, fdy) => {
+    let cx = px, cy = py;
+    while (true) {
+      const nx = cx + fdx, ny = cy + fdy;
+      if (!inB(nx, ny)) { state.dynamic.player = { mode:'free', x:cx, y:cy }; p = state.dynamic.player; return; }
+      const nType = getBlock(nx, ny);
+
+      if (BlockTypes[nType]?.isFragile) state.base[ny][nx] = 'floor';
+      if (BlockTypes[nType]?.isNotFly) { state.dynamic.player = { mode:'free', x:cx, y:cy }; p = state.dynamic.player; return; }
+
+      const ab = anyBoxAtState(state, nx, ny);
+      if (BlockTypes[nType]?.isStickOnFly) {
+        state.dynamic.player = b ? { mode:'inbox', x:nx, y:ny, entryDir:{dx:fdx,dy:fdy} }
+                         : { mode:'free',  x:nx, y:ny };
+        p = state.dynamic.player; return;
+      }
+      if (ab) { state.dynamic.player = { mode:'inbox', x:nx, y:ny, entryDir:{dx:fdx,dy:fdy} }; p = state.dynamic.player; return; }
+
+      cx = nx; cy = ny;
+    }
+  };
+
+  const px = p.x, py = p.y;
+
+  if (p.mode === 'free') {
+    const nx = px + dx, ny = py + dy;
+    if (!inB(nx, ny)) return { state };
+    const t = getBlock(nx, ny);
+    if (BlockTypes[t]?.isWallForPlayer) return { state };
+    const ab = anyBoxAtState(state, nx, ny);
+    if (ab) { state.dynamic.player = { mode:'inbox', x:nx, y:ny, entryDir:{dx,dy} }; return { state }; }
+    p.x = nx; p.y = ny;
+    return { state };
+  }
+
+  const tx = px + dx, ty = py + dy;
+  if (!inB(tx, ty)) return { state };
+  const targetType = getBlock(tx, ty);
+
+  // Identify if the player's current box is heavy
+  const isHeavyHere = !!heavyBoxAtState(state, px, py);
+
+  // --- Flight reverse of entry (unchanged for both box types)
+  if (dx === -p.entryDir.dx && dy === -p.entryDir.dy && !BlockTypes[targetType]?.isWallForPlayer) {
+    resolveFlight(px, py, dx, dy);
+    return { state };
+  }
+
+  // Wall for boxes blocks movement
+  if (BlockTypes[targetType]?.isWallForBox) return { state };
+
+  // See what’s in front
+  const front = anyBoxAtState(state, tx, ty);
+
+  // ---------- HEAVY BOX SPECIAL BEHAVIOR ----------
+  if (isHeavyHere) {
+    const sameAsEntry = (dx === p.entryDir.dx && dy === p.entryDir.dy && !(dx===0 && dy===0));
+    const entryIsZero = (p.entryDir.dx === 0 && p.entryDir.dy === 0);
+
+    // Case A: move in the same direction as entryDir
+    if (sameAsEntry) {
+      if (front) {
+        // SPECIAL CASE: blocked by a box -> behave like normal (try push chain). NO neutralize.
+        const bx2 = tx + dx, by2 = ty + dy;
+        if (!inB(bx2, by2)) return { state };
+        const beyondType = getBlock(bx2, by2);
+
+        if (BlockTypes[beyondType]?.isWallForBox || anyBoxAtState(state, bx2, by2)) return { state };
+
+        if (BlockTypes[beyondType]?.isHoleForBox) {
+          removeAnyBoxState(state, front.type, tx, ty);
+          moveHeavyBoxState(state, px, py, tx, ty); // current heavy moves into front cell
+          // Player stays in-box at (tx,ty); keep entryDir as-is (no neutralize).
+          state.dynamic.player = { mode:'inbox', x:tx, y:ty, entryDir: { ...p.entryDir } };
+          p = state.dynamic.player;
+          return { state };
+        } else {
+          // push the front box, then move heavy
+          moveAnyBoxState(state, front.type, tx, ty, bx2, by2);
+          moveHeavyBoxState(state, px, py, tx, ty);
+          p.x = tx; p.y = ty;
+          // keep entryDir as-is (no neutralization)
+          return { state };
+        }
+      } else {
+        // FRONT IS EMPTY -> heavy moves forward AND NEUTRALIZES (entryDir = 0,0)
+        if (BlockTypes[targetType]?.isHoleForBox) {
+          // heavy falls into hole
+          removeHeavyBoxState(state, px, py);
+          state.dynamic.player = { mode:'inbox', x:tx, y:ty, entryDir: { dx:0, dy:0 } }; // neutralized
+          p = state.dynamic.player;
+          return { state };
+        }
+        // normal move + neutralize
+        moveHeavyBoxState(state, px, py, tx, ty);
+        p.x = tx; p.y = ty;
+        p.entryDir = { dx:0, dy:0 };
+        return { state };
+      }
+    }
+
+    // Case B: entryDir == (0,0)  -> next move sets entryDir to opposite(move)
+    if (entryIsZero) {
+      if (front || BlockTypes[targetType]?.isWallForBox) return { state }; // blocked, do nothing
+      // switch entryDir to opposite of the move and proceed as normal
+      p.entryDir = { dx: -dx, dy: -dy };
+
+      if (BlockTypes[targetType]?.isHoleForBox) {
+        removeHeavyBoxState(state, px, py);
+        state.dynamic.player = { mode:'inbox', x:tx, y:ty, entryDir: { ...p.entryDir } };
+        p = state.dynamic.player;
+        return { state };
+      }
+      moveHeavyBoxState(state, px, py, tx, ty);
+      p.x = tx; p.y = ty;
+      return { state };
+    }
+
+    // Case C: any other direction (not reverse flight, not same, entryDir!=0)
+    // Behave exactly like a normal box move
+    if (front) {
+      const bx2 = tx + dx, by2 = ty + dy;
+      if (!inB(bx2, by2)) return { state };
+      const beyondType = getBlock(bx2, by2);
+      if (BlockTypes[beyondType]?.isWallForBox || anyBoxAtState(state, bx2, by2)) return { state };
+
+      if (BlockTypes[beyondType]?.isHoleForBox) {
+        removeAnyBoxState(state, front.type, tx, ty);
+        moveHeavyBoxState(state, px, py, tx, ty);
+        state.dynamic.player = { mode:'inbox', x:tx, y:ty, entryDir: { ...p.entryDir } };
+        p = state.dynamic.player;
+        return { state };
+      } else {
+        moveAnyBoxState(state, front.type, tx, ty, bx2, by2);
+        moveHeavyBoxState(state, px, py, tx, ty);
+        p.x = tx; p.y = ty;
+        return { state };
+      }
+    } else {
+      if (BlockTypes[targetType]?.isHoleForBox) {
+        removeHeavyBoxState(state, px, py);
+        state.dynamic.player = { mode:'inbox', x:tx, y:ty, entryDir: { ...p.entryDir } };
+        p = state.dynamic.player;
+        return { state };
+      }
+      moveHeavyBoxState(state, px, py, tx, ty);
+      p.x = tx; p.y = ty;
+      return { state };
+    }
+  }
+  // ---------- END HEAVY BOX SPECIALS ----------
+
+
+  // ----------- NORMAL BOX BEHAVIOR (existing, unchanged) -----------
+  if (front) {
+    const bx2 = tx + dx, by2 = ty + dy;
+    if (!inB(bx2, by2)) return { state };
+    const beyondType = getBlock(bx2, by2);
+    if (BlockTypes[beyondType]?.isWallForBox || anyBoxAtState(state, bx2, by2)) return { state };
+
+    if (BlockTypes[beyondType]?.isHoleForBox) {
+      // front box (could be heavy!) falls, then move player's box
+      removeAnyBoxState(state, front.type, tx, ty);
+      moveBoxState(state, px, py, tx, ty);
+      state.dynamic.player = { mode:'inbox', x:tx, y:ty, entryDir: { ...p.entryDir } };
+      p = state.dynamic.player;
+      return { state };
+    } else {
+      moveAnyBoxState(state, front.type, tx, ty, bx2, by2);
+      moveBoxState(state, px, py, tx, ty);
+      p.x = tx; p.y = ty;
+      return { state };
+    }
+  } else {
+    if (BlockTypes[targetType]?.isHoleForBox) {
+      removeBoxState(state, px, py);
+      state.dynamic.player = { mode:'inbox', x:tx, y:ty, entryDir: { ...p.entryDir } };
+      p = state.dynamic.player;
+      return { state };
+    }
+    moveBoxState(state, px, py, tx, ty);
+    p.x = tx; p.y = ty;
+    return { state };
+  }
+}
+
+/* -------------------- GAME LOGIC USING simulateMove -------------------- */
+function pushSnapshot(){ undoStack.push(cloneState()); }
+
+function attemptMove(dx, dy) {
+  if (buildMode || !dynamicElements.player) return;
+  if (gameState) return;
+
+  const current = { base, dynamic: dynamicElements };
+  const { state: newState } = simulateMove(current, dx, dy);
+
+  // If nothing changed, do nothing (prevents duplications & empty-steps)
+  const unchanged =
+    newState.dynamic.player && dynamicElements.player &&
+    newState.dynamic.player.mode === dynamicElements.player.mode &&
+    newState.dynamic.player.x === dynamicElements.player.x &&
+    newState.dynamic.player.y === dynamicElements.player.y &&
+    JSON.stringify(newState.dynamic.boxes) === JSON.stringify(dynamicElements.boxes) &&
+    JSON.stringify(newState.dynamic.heavyBoxes) === JSON.stringify(dynamicElements.heavyBoxes) &&
+    JSON.stringify(newState.base) === JSON.stringify(base);
+
+  if (unchanged) return;
+
+  pushSnapshot();
+
+  // Atomically replace base/dynamicElements.boxes/dynamicElements.player -> no duplication
+  base = newState.base.map(r => r.slice());
+  dynamicElements = cloneDynamic(newState.dynamic);
+
+  for (const oldBox of undoStack[undoStack.length - 1].dynamic.boxes) {
+    const hole = attr(base[oldBox.y][oldBox.x], 'isHoleForBox');
+    const stillExists = dynamicElements.boxes.some(b => b.x===oldBox.x && b.y===oldBox.y);
+    if (hole && !stillExists) animateBoxFall(oldBox.x, oldBox.y);
+  }
+  // ADD heavy boxes too
+  for (const oldHb of undoStack[undoStack.length - 1].dynamic.heavyBoxes) {
+    const hole = attr(base[oldHb.y][oldHb.x], 'isHoleForBox');
+    const stillExists = dynamicElements.heavyBoxes.some(h => h.x===oldHb.x && h.y===oldHb.y);
+    if (hole && !stillExists) animateBoxFall(oldHb.x, oldHb.y);
+  }
+
+  draw();
+
+  // Terminal checks (outside simulateMove)
+  if (isLosingStateForSolver(newState)) {
+    setGameState('lose', 'Game Over — fell into hole or box fell');
+  } else if (isWinningStateForSolver(newState)) {
+    setGameState('win', 'You Win!');
+  } else {
+    setGameState(null);
+  }
+}
+
+/* -------------------- GAME STATE UI -------------------- */
+function setGameState(state, message){
+  gameState = state;
+  const el = document.getElementById('bigMessage');
+  if(!el) return;
+  if(state === 'win'){ el.textContent = message || 'You Win!'; el.style.color = 'green'; }
+  else if(state === 'lose'){ el.textContent = message || 'You Lose'; el.style.color = 'crimson'; }
+  else { el.textContent = ''; }
+}
+
+/* ---------- INIT ---------- */
+updateToolbarVisibility();
+draw();
+
+/* -------------------- SOLVER -------------------- */
+const solverStatusEl = document.getElementById('solverProgress');
+const solutionsListEl = document.getElementById('solutionsList');
+let solverRunning = false;
+let solverCancel = false;
+
+/* --- Zobrist initialization --- */
+let zobrist = null;
+function initZobrist(r, c){
+  function rndBig(){
+    const n = Math.floor(Math.random() * Number(2**30));
+    const m = Math.floor(Math.random() * Number(2**23));
+    return (BigInt(n) << 23n) ^ BigInt(m);
+  }
+  const table = { salt: rndBig(), r, c };
+
+  const dynTypes = ['boxes', 'heavyBoxes', 'fragiles']; // ADD 'heavyBoxes'
+
+  for (const t of dynTypes) {
+    table[t] = Array.from({length:r}, ()=> Array.from({length:c}, ()=> rndBig()));
+  }
+
+  table.playerFree = Array.from({length:r}, ()=> Array.from({length:c}, ()=> rndBig()));
+  table.playerInboxDir = Array.from({length:4}, ()=> Array.from({length:r}, ()=> Array.from({length:c}, ()=> rndBig())));
+
+  zobrist = table;
+}
+
+function dirIndex(dx,dy){
+  if(dx===1 && dy===0) return 0;
+  if(dx===-1 && dy===0) return 1;
+  if(dx===0 && dy===-1) return 2;
+  if(dx===0 && dy===1) return 3;
+  return 0;
+}
+function computeZobristHashForState(state){
+  if (!zobrist || zobrist.r !== state.base.length || zobrist.c !== state.base[0].length) {
+    initZobrist(state.base.length, state.base[0].length);
+  }
+  let h = 0n ^ zobrist.salt;
+  const dyn = state.dynamic;
+  const p = dyn.player;
+  if (p) {
+    if (p.mode === 'free') h ^= zobrist.playerFree[p.y][p.x];
+    else {
+      const di = dirIndex(p.entryDir.dx, p.entryDir.dy);
+      h ^= zobrist.playerInboxDir[di][p.y][p.x];
+    }
+  }
+  // hash all dynamic lists except player
+  for (const [type, list] of Object.entries(dyn)) {
+    if (type === 'player') continue;
+    const table = zobrist[type];
+    if (!table) continue;
+    for (const e of list) h ^= table[e.y][e.x];
+  }
+
+  return h.toString();
+}
+
+function stateToHashForSolver(state){ return computeZobristHashForState(state); }
+
+/* subset helper */
+function isSubsetArray(smallArr, bigArr){
+  const bigSet = new Set(bigArr);
+  for(const x of smallArr) if(!bigSet.has(x)) return false;
+  return true;
+}
+// --- Cycle reduction: remove loops in the path so endings like "...awdsA D" compress ---
+function reducePathByCycles(pathHashes, pathMoves){
+  // pathHashes length = pathMoves length + 1
+  if (!pathHashes || pathHashes.length === 0) return { hashes: [], moves: [] };
+
+  const hashes = [pathHashes[0]];
+  const moves  = [];
+  const indexOf = new Map([[pathHashes[0], 0]]);
+
+  for (let i = 1; i < pathHashes.length; i++) {
+    const h = pathHashes[i];
+    if (indexOf.has(h)) {
+      // cut back to the first occurrence of h (remove the loop)
+      const cutTo = indexOf.get(h);
+      while (hashes.length - 1 > cutTo) {
+        const removedHash = hashes.pop();
+        indexOf.delete(removedHash);
+        moves.pop();
+      }
+      // do not push h again (already on top)
+    } else {
+      // keep step
+      moves.push(pathMoves[i - 1]); // move leading into this hash
+      hashes.push(h);
+      indexOf.set(h, hashes.length - 1);
+    }
+  }
+  return { hashes, moves };
+}
+
+// --- Finalize and store a solution with dedup: final-state + subset-of-states ---
+function addOrMergeSolution(newState, newPathMoves, newHashesPath, solutions, stateToHashForSolver){
+  // 1) Reduce cycles
+  const reduced = reducePathByCycles(newHashesPath, newPathMoves);
+  const solObj = {
+    movesArr: reduced.moves.slice(),
+    movesStr: reduced.moves.join(''),
+    statesHashes: reduced.hashes.slice(),
+    length: reduced.moves.length,
+  };
+
+  // 2) Final-state dedupe: only keep the shortest per end configuration
+  const finalHash = stateToHashForSolver(newState);
+  const existing = solutions.find(s => s.finalHash === finalHash);
+  if (existing) {
+    if (solObj.length < existing.length) {
+      existing.movesArr = solObj.movesArr;
+      existing.movesStr = solObj.movesStr;
+      existing.statesHashes = solObj.statesHashes;
+      existing.length = solObj.length;
+      // keep same finalHash
+    }
+  } else {
+    solObj.finalHash = finalHash;
+    solutions.push(solObj);
+  }
+
+  // 3) Subset-of-states dedupe across all kept solutions
+  outer: for (let i = 0; i < solutions.length; i++) {
+    for (let j = i + 1; j < solutions.length; j++) {
+      const A = solutions[i], B = solutions[j];
+
+      // If they share the same final state, keep the shorter one
+      if (A.finalHash === B.finalHash) {
+        if (A.length <= B.length) { solutions.splice(j,1); j--; }
+        else { solutions.splice(i,1); i--; continue outer; }
+        continue;
+      }
+
+      const setA = new Set(A.statesHashes);
+      const setB = new Set(B.statesHashes);
+      const AinB = [...setA].every(h => setB.has(h));
+      const BinA = [...setB].every(h => setA.has(h));
+
+      // If one path's state set is included in the other's, keep the shorter
+      if (AinB && A.length <= B.length) { solutions.splice(j,1); j--; }
+      else if (BinA && B.length <= A.length) { solutions.splice(i,1); i--; continue outer; }
+    }
+  }
+
+  solutions.sort((a,b)=> a.length - b.length);
+}
+
+
+async function runSolverAsync(options = {}){
+  const maxDepth = Math.max(1, Number(options.maxDepth || 100));
+  const maxNodes = Math.max(100, Number(options.maxNodes || 200000));
+  const maxSolutions = Math.max(1, Number(options.maxSolutions || 100));
+
+  const initState = { base: base.map(r=>r.slice()), dynamic: cloneDynamic(dynamicElements) };
+
+  if(!zobrist || zobrist.r !== rows || zobrist.c !== cols) initZobrist(rows, cols);
+
+  const visited = new Set();
+  const queue = [];
+  const initialHash = stateToHashForSolver(initState);
+  visited.add(initialHash);
+  queue.push({ state: cloneStateForSolver(initState), pathMoves: [], hashesPath: [initialHash], depth: 0 });
+
+  let nodesExpanded = 0;
+  let solutions = [];
+
+  solverStatusEl.textContent = `Searching... (0 nodes)`;
+  solverRunning = true;
+  solverCancel = false;
+  document.getElementById('runSolver').disabled = true;
+  document.getElementById('stopSolver').disabled = false;
+
+  const directions = [
+    {dx:1,dy:0, code:'d'},
+    {dx:-1,dy:0, code:'a'},
+    {dx:0,dy:-1, code:'w'},
+    {dx:0,dy:1, code:'s'}
+  ];
+
+  while(queue.length > 0 && nodesExpanded < maxNodes && solutions.length < maxSolutions && !solverCancel){
+    const node = queue.shift();
+    nodesExpanded++;
+    solverStatusEl.textContent = `Searching... nodes:${nodesExpanded}, queue:${queue.length}, solutions:${solutions.length}`;
+
+    if(node.depth < maxDepth){
+      for(const dir of directions){
+        const res = simulateMove(cloneStateForSolver(node.state), dir.dx, dir.dy);
+        const newState = res.state;
+
+        // canonicalize dynamicElements.boxes
+        newState.dynamic.boxes = newState.dynamic.boxes.slice().sort((a,b)=> a.x - b.x || a.y - b.y);
+
+        const h = stateToHashForSolver(newState);
+
+        // Skip immediate in-path repeats (prevents cycles in a single path)
+        if(node.hashesPath.includes(h)) continue;
+
+        const term = isLosingStateForSolver(newState) ? 'lose'
+                    : isWinningStateForSolver(newState) ? 'win'
+                    : null;
+
+        const newPathMoves = node.pathMoves.concat([dir.code]);
+        const newHashesPath = node.hashesPath.concat([h]);
+
+        if (term === 'win') {
+          addOrMergeSolution(newState, newPathMoves, newHashesPath, solutions, stateToHashForSolver);
+          if (solutions.length >= maxSolutions) break;
+          continue;
+        }
+        if(term === 'lose') continue;
+
+        // If already globally visited, skip enqueuing (prevents global loops)
+        if(visited.has(h)) continue;
+
+        visited.add(h);
+        queue.push({ state: newState, pathMoves: newPathMoves, hashesPath: newHashesPath, depth: node.depth + 1 });
+      }
+    }
+
+    if(nodesExpanded % 500 === 0){
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if(solverCancel) break;
+    }
+  }
+
+  solverRunning = false;
+  document.getElementById('runSolver').disabled = false;
+  document.getElementById('stopSolver').disabled = true;
+
+  solverStatusEl.textContent = `Done. nodes expanded: ${nodesExpanded}, found: ${solutions.length}`;
+  let filtered = solutions;
+  try {
+    //filtered = removeNearDuplicatesKeepShortestFirst(solutions, 2);
+    filtered = removeNearDuplicatesLargestFirst(solutions, 3);
+    if (!filtered || filtered.length === 0) filtered = solutions;
+  } catch (e) {
+    console.error('near-dup filter error:', e);
+  }
+  renderSolutions(filtered);
+  return { solutions: filtered, nodesExpanded };
+
+}
+// Fast 1-edit (insert/delete/substitute).
+function isOneEditApart(a, b) {
+  if (a === b) return false;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+
+  let i = 0, j = 0, edits = 0;
+  while (i < la && j < lb) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (la > lb) i++;       // delete from a
+    else if (lb > la) j++;  // insert in a
+    else { i++; j++; }      // substitute
+  }
+  if (i < la || j < lb) edits++;
+  return edits === 1;
+}
+
+// Levenshtein with band + early exit. Returns true iff distance <= limit.
+function editDistanceAtMost(a, b, limit) {
+  if (a === b) return true;
+  let la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > limit) return false;
+  if (la > lb) { const t = a; a = b; b = t; la = a.length; lb = b.length; }
+
+  let prev = new Array(lb + 1), curr = new Array(lb + 1);
+  for (let j = 0; j <= lb; j++) prev[j] = j;
+
+  for (let i = 1; i <= la; i++) {
+    curr[0] = i;
+    const jStart = Math.max(1, i - limit);
+    const jEnd   = Math.min(lb, i + limit);
+
+    for (let j = 1; j < jStart; j++) curr[j] = limit + 1;
+    let rowMin = curr[jStart - 1];
+
+    for (let j = jStart; j <= jEnd; j++) {
+      const cost = (a[i-1] === b[j-1]) ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j-1] + 1, prev[j-1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    for (let j = jEnd + 1; j <= lb; j++) curr[j] = limit + 1;
+
+    if (rowMin > limit) return false;
+    const t = prev; prev = curr; curr = t;
+  }
+  return prev[lb] <= limit;
+}
+// --- Remove near-duplicates, longest first ---
+// Any path is dropped if there's a kept shorter (or equal-length) path
+// within <= maxEdits (Levenshtein, early-exit). Same-length collisions
+// are resolved by keeping lexicographically smallest first.
+function removeNearDuplicatesLargestFirst(solutions, maxEdits = 2) {
+  if (!Array.isArray(solutions) || solutions.length === 0) return solutions;
+
+  // Bucket by length
+  const groups = new Map();
+  for (const s of solutions) {
+    if (!groups.has(s.length)) groups.set(s.length, []);
+    groups.get(s.length).push(s);
+  }
+  const lengthsDesc = Array.from(groups.keys()).sort((a,b)=> b - a);
+  const lengthsAsc  = Array.from(groups.keys()).sort((a,b)=> a - b);
+
+  // Start by keeping everything; we’ll drop from the top down
+  const toKeep = new Set(solutions);
+
+  // Helper: gather all KEPT solutions strictly shorter than L
+  const keptShorterThan = (L) => {
+    const res = [];
+    for (const len of lengthsAsc) {
+      if (len >= L) break;
+      const g = groups.get(len) || [];
+      for (const s of g) if (toKeep.has(s)) res.push(s);
+    }
+    return res;
+  };
+
+  // Walk lengths from longest to shortest
+  for (const L of lengthsDesc) {
+    const longerGroup = groups.get(L) || [];
+    const shorterPool = keptShorterThan(L);
+
+    // 1) Drop against KEPT strictly-shorter pool (largest-first policy)
+    for (const cand of longerGroup) {
+      if (!toKeep.has(cand)) continue; // maybe dropped in same-length pass below
+      const nearDupShorter = shorterPool.some(shorter => {
+        const dlen = L - shorter.length;
+        if (dlen > maxEdits) return false;
+        if (dlen === 1 && isOneEditApart(cand.movesStr, shorter.movesStr)) return true;
+        return editDistanceAtMost(cand.movesStr, shorter.movesStr, maxEdits);
+      });
+      if (nearDupShorter) toKeep.delete(cand);
+    }
+
+    // 2) Also thin within the SAME length (keep lexicographically smallest representatives)
+    const sameLenKept = longerGroup
+      .filter(s => toKeep.has(s))
+      .sort((a,b)=> a.movesStr.localeCompare(b.movesStr));
+
+    const keepAtThisLen = [];
+    for (const cand of sameLenKept) {
+      const collides = keepAtThisLen.some(k =>
+        editDistanceAtMost(cand.movesStr, k.movesStr, maxEdits)
+      );
+      if (collides) {
+        toKeep.delete(cand);
+      } else {
+        keepAtThisLen.push(cand);
+      }
+    }
+  }
+
+  const out = solutions.filter(s => toKeep.has(s));
+  out.sort((a,b)=> a.length - b.length || a.movesStr.localeCompare(b.movesStr));
+  return out;
+}
+
+// Keep shortest set; drop any longer solution within <=maxEdits of a kept shorter one.
+function removeNearDuplicatesKeepShortestFirst(solutions, maxEdits = 2) {
+  if (!Array.isArray(solutions) || solutions.length === 0) return solutions;
+
+  const sorted = solutions
+    .slice()
+    .sort((a, b) => a.length - b.length || a.movesStr.localeCompare(b.movesStr));
+
+  const keep = [];
+  for (const cand of sorted) {
+    const clashesWithShorter = keep.some(shorter => {
+      const dlen = cand.length - shorter.length;
+      if (dlen < 0 || dlen > maxEdits) return false; // only compare to shorter within window
+
+      if (dlen === 1 && isOneEditApart(cand.movesStr, shorter.movesStr)) return true;
+      return editDistanceAtMost(cand.movesStr, shorter.movesStr, maxEdits);
+    });
+    if (!clashesWithShorter) keep.push(cand);
+  }
+  return keep;
+}
+
+/* render list of solutions */
+function renderSolutions(solutions){
+  solutionsListEl.innerHTML = '';
+  if(solutions.length === 0) { solutionsListEl.textContent = '(no solutions found)'; return; }
+  solutions.forEach((s, idx) => {
+    const div = document.createElement('div');
+    div.className = 'solutionItem';
+    div.innerHTML = `<div>#${idx+1} len:${s.length} moves: <b>${s.movesStr}</b></div>`;
+    const playBtn = document.createElement('button'); playBtn.textContent = 'Play'; playBtn.addEventListener('click', ()=> playSolution(s));
+    const exportBtn = document.createElement('button'); exportBtn.textContent = 'Export'; exportBtn.addEventListener('click', ()=> exportSolution(s));
+    div.appendChild(playBtn); div.appendChild(exportBtn);
+    solutionsListEl.appendChild(div);
+  });
+}
+
+/* export all solutions currently shown */
+document.getElementById('exportSolutions').addEventListener('click', ()=>{
+  alert('Use "Export" per-solution for now.');
+});
+
+/* playSolution: animate moves on main game (resets to savedSnapshot then plays) */
+async function playSolution(sol) {
+  if (!savedSnapshot) {
+    alert('No saved snapshot to play from. Enter build mode then press Toggle Build Mode to generate reset snapshot.');
+    return;
+  }
+
+  // Reset to saved snapshot first
+  restoreState(savedSnapshot);
+  undoStack = [ cloneState() ];
+  setGameState(null);
+  draw();
+
+  // Small pause before starting playback
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  // Play the recorded moves
+  for (const ch of sol.movesArr) {
+    if (gameState) break; // stop if win/lose during animation
+    if (ch === 'w') attemptMove(0, -1);
+    if (ch === 's') attemptMove(0, 1);
+    if (ch === 'a') attemptMove(-1, 0);
+    if (ch === 'd') attemptMove(1, 0);
+    await new Promise(resolve => setTimeout(resolve, 160));
+  }
+}
+
+
+/* export single solution as JSON containing moves string and states */
+function exportSolution(sol){
+  const data = { moves: sol.movesStr, length: sol.length };
+  const blob = new Blob([JSON.stringify(data, null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'solution.json'; a.click(); URL.revokeObjectURL(url);
+}
+
+/* solver UI wiring */
+document.getElementById('toggleSolver').addEventListener('click', ()=>{
+  const p = document.getElementById('solverPanel');
+  p.classList.toggle('hidden');
+});
+document.getElementById('runSolver').addEventListener('click', async ()=>{
+  const maxDepth = Number(document.getElementById('solverMaxDepth').value);
+  const maxNodes = Number(document.getElementById('solverMaxNodes').value);
+  const maxSolutions = Number(document.getElementById('solverMaxSolutions').value);
+  solverCancel = false;
+  await runSolverAsync({ maxDepth, maxNodes, maxSolutions });
+});
+document.getElementById('stopSolver').addEventListener('click', ()=>{
+  solverCancel = true;
+  solverStatusEl.textContent = 'Cancel requested...';
+});
+
+/* -------------------- END SOLVER -------------------- */
+</script>
+</body>
+</html>
