@@ -77,7 +77,13 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
       s.entities = s.entities.filter(e => !(e.x===x && e.y===y && pushableTypes.has(e.type)));
     }
 
-    s.entities.push({ type, x, y });
+    if (type === EntityTypes.fragileWall) {
+      // Capture the current base tile so breaking restores it correctly
+      const underTile = s.base[y][x] || 'floor';
+      s.entities.push({ type, x, y, underTile });
+    } else {
+      s.entities.push({ type, x, y });
+    }
   }
 
   function paintAt(e){
