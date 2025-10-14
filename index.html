@@ -517,7 +517,7 @@
               </label>
               <label title="Use population with this probability (0..1); 0 disables">
                 Use Genetic (ratio)
-                <input id="genUseRatio" type="number" min="0" max="1" step="0.05" value="0" />
+                <input id="genUseRatio" type="number" min="0" max="1" step="0.05" value="0.2" />
               </label>
               <label title="0 uniform over top; 1 always pick top">
                 Parent Skew
@@ -525,7 +525,7 @@
               </label>
               <label title="Chance to crossover two parents (population attempts)">
                 Crossover %
-                <input id="genCrossoverPct" type="number" min="0" max="100" step="1" value="10" />
+                <input id="genCrossoverPct" type="number" min="0" max="100" step="1" value="5" />
               </label>
               <label title="Override Max tiles changed for population attempts (blank = use above)">
                 Pop Mutations
@@ -534,7 +534,7 @@
               
             </div>
             <div class="solver-actions" aria-label="Entity mutations">
-              <button id="autoMovePlayer" class="mutate-toggle" aria-pressed="false">Move Player</button>
+              <button id="autoMovePlayer" class="mutate-toggle active" aria-pressed="true">Move Player</button>
             </div>
             <button type="button" class="tile-toggle" data-target="autoTilesChange" aria-expanded="false">Tiles allowed to change</button>
             <div class="tile-filter-panel hidden" id="autoTilesChange" aria-hidden="true">
@@ -544,17 +544,17 @@
               </div>
               <div class="tile-filter-options">
                 <button type="button" class="tile-chip active" data-value="floor" aria-pressed="true">floor</button>
-                <button type="button" class="tile-chip" data-value="wall" aria-pressed="false">wall</button>
-                <button type="button" class="tile-chip" data-value="hole" aria-pressed="false">hole</button>
-                <button type="button" class="tile-chip" data-value="exit" aria-pressed="false">exit</button>
-                <button type="button" class="tile-chip" data-value="pressurePlate" aria-pressed="false">pressurePlate</button>
-                <button type="button" class="tile-chip" data-value="grile" aria-pressed="false">grile</button>
-                <button type="button" class="tile-chip" data-value="spikes" aria-pressed="false">spikes</button>
-                <button type="button" class="tile-chip" data-value="holeSpikes" aria-pressed="false">holeSpikes</button>
-                <button type="button" class="tile-chip" data-value="slimPathFloor" aria-pressed="false">slimPathFloor</button>
-                <button type="button" class="tile-chip" data-value="slimPathHole" aria-pressed="false">slimPathHole</button>
-                <button type="button" class="tile-chip" data-value="fragileWall" aria-pressed="false">fragileWall</button>
-                <button type="button" class="tile-chip" data-option="removeBoxes" aria-pressed="false">Remove Boxes</button>
+                <button type="button" class="tile-chip active" data-value="wall" aria-pressed="true">wall</button>
+                <button type="button" class="tile-chip active" data-value="hole" aria-pressed="true">hole</button>
+                <button type="button" class="tile-chip active" data-value="exit" aria-pressed="true">exit</button>
+                <button type="button" class="tile-chip active" data-value="pressurePlate" aria-pressed="true">pressurePlate</button>
+                <button type="button" class="tile-chip active" data-value="grile" aria-pressed="true">grile</button>
+                <button type="button" class="tile-chip active" data-value="spikes" aria-pressed="true">spikes</button>
+                <button type="button" class="tile-chip active" data-value="holeSpikes" aria-pressed="true">holeSpikes</button>
+                <button type="button" class="tile-chip active" data-value="slimPathFloor" aria-pressed="true">slimPathFloor</button>
+                <button type="button" class="tile-chip active" data-value="slimPathHole" aria-pressed="true">slimPathHole</button>
+                <button type="button" class="tile-chip active" data-value="fragileWall" aria-pressed="true">fragileWall</button>
+                <button type="button" class="tile-chip active" data-option="removeBoxes" aria-pressed="true">Remove Boxes</button>
               </div>
             </div>
             <button type="button" class="tile-toggle" data-target="autoTilesPlace" aria-expanded="false">Tiles allowed to place</button>
@@ -575,7 +575,7 @@
                 <button type="button" class="tile-chip active" data-value="slimPathFloor" aria-pressed="true">slimPathFloor</button>
                 <button type="button" class="tile-chip active" data-value="slimPathHole" aria-pressed="true">slimPathHole</button>
                 <button type="button" class="tile-chip active" data-value="fragileWall" aria-pressed="true">fragileWall</button>
-                <button type="button" class="tile-chip" data-option="placeBoxes" aria-pressed="false">Place Boxes</button>
+                <button type="button" class="tile-chip active" data-option="placeBoxes" aria-pressed="true">Place Boxes</button>
               </div>
             </div>
             <div class="solver-actions">
@@ -1054,6 +1054,7 @@
   </script>
 </body>
 </html>
+
 
 
 

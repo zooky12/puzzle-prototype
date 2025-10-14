@@ -45,10 +45,10 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     // Default baseline for all presets (bands off unless specified)
     const presets = {
       generic: {
-        weights: { U:1.0, D:1.0, Fr:1.0, S:1.0, M:0.5, F:0.5, Y:0.5 },
+        weights: { U:1.0, D:1.0, Fr:0.0, S:2.0, M:0.0, F:0.0, Y:0.0 },
         bands:   { U:{en:false,min:0.01,max:1}, S:{en:false,min:0.01,max:1} },
         params:  { U_Smax:16, S_Lmin:10, S_Lmax:100, F_kind:'sine', Y_sym:'horizontal' },
-        gcons:   { minDead:4, LminSolv:0 }
+        gcons:   { minDead:0, LminSolv:0 }
       },
       elegant: {
         weights: { U:1.2, D:0.8, Fr:0.6, S:1.0, M:0.6, F:1.2, Y:0.6 },
