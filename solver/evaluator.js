@@ -421,6 +421,38 @@ export function combineScore(metrics, weights, { mapSigned=true } = {}){
   return { score_signed: signed, score01, breakdown };
 }
 
+// Build the set of dead-region states whose dead-end depth (in states) is >= minSteps+1
+// minSteps is expressed in moves; internally we compare in states (moves+1)
+export function computeAllowedDeadSetFromGraph(solverGraph, minSteps = 0) {
+  try {
+    const processed = solverGraph.processed || new Set();
+    const edges = solverGraph.edges || [];
+    const { adj, rev } = solverGraph.adj && solverGraph.rev ? solverGraph : buildAdjacency(edges);
+    const goalHashes = new Set(solverGraph.goalHashes || []);
+    const G = goalHashes.size ? reverseReachableFrom(goalHashes, rev) : new Set();
+    const deadNodes = [];
+    for (const h of processed) if (!G.has(h)) deadNodes.push(h);
+    if (deadNodes.length === 0) return new Set();
+    const adjDead = new Map();
+    for (const v of deadNodes) {
+      const outs = (adj.get(v) || []).filter(w => processed.has(w) && !G.has(w));
+      adjDead.set(v, outs);
+    }
+    const { comps, idOf } = sccTarjan(deadNodes, adjDead);
+    const lp = longestPathOnCondensation(deadNodes, adjDead, idOf, comps);
+    const allowed = new Set();
+    const needStates = Math.max(0, Math.floor(minSteps) + 1);
+    for (const v of deadNodes) {
+      const c = idOf.get(v);
+      const depthStates = lp[c] || 0;
+      if (depthStates >= needStates) allowed.add(v);
+    }
+    return allowed;
+  } catch {
+    return new Set();
+  }
+}
+
 export function evaluateLevel({ initialState, solverResult, solverGraph, weights={}, bands={}, params={}, gcons, mapSigned=true }){
   // Hard filters
   if (!solverResult || !Array.isArray(solverResult.solutions)){

@@ -2,7 +2,7 @@
 import { cloneState, removeRow, removeColumn, findPlayer } from '../core/state.js';
 import { EntityTypes, isSolid } from '../core/entities.js';
 import { isTrait, getTileTraits } from '../core/tiles.js';
-import { evaluateLevel } from '../solver/evaluator.js';
+import { evaluateLevel, computeAllowedDeadSetFromGraph } from '../solver/evaluator.js';
 
 export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
   const runBtn = document.getElementById('runAuto');
@@ -271,9 +271,22 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
 
       const solutions = Array.isArray(result?.solutions) ? result.solutions : [];
       if (solutions.length < 1) continue;
+      // Filter dead ends by depth threshold (in steps) across the graph
+      const cfg = readScoringConfig();
+      const minSteps = Math.max(0, (cfg.globalConstraints?.min_dead_end_depth_len||0));
+      const moveIdx = buildMoveIndex(result?.graph?.edges);
+      const allowed = computeAllowedDeadSetFromGraph(result?.graph||{}, minSteps);
+      const deadEndsRaw = Array.isArray(result?.deadEnds) ? result.deadEnds : [];
+      const filteredDeadEnds = deadEndsRaw.filter(de => {
+        try {
+          let cur = result?.graph?.startHash;
+          if(!cur) return false;
+          for(const ch of (de.moves||'')){ const m = moveIdx.get(cur); if(!m||!m.has(ch)) return false; cur = m.get(ch); }
+          return allowed.has(cur);
+        } catch { return false; }
+      });
 
       // Scoring
-      const cfg = readScoringConfig();
       const evalRes = evaluateLevel({
         initialState: candidate,
         solverResult: result,
@@ -298,7 +311,7 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       // Note: Do not simplify candidates automatically here; user can run Simplify from Build Tools
 
       const fastest = Math.min(...solutions.map(s => s.length));
-      const deadEnds = Array.isArray(result?.deadEnds) ? result.deadEnds : [];
+      const deadEnds = filteredDeadEnds;
       const score01 = evalRes.score ?? 0;
       best.push({ state: cloneState(candidate), solutions, deadEnds, fastest, score01 });
       best.sort((a, b) => b.score01 - a.score01);
@@ -1160,6 +1173,8 @@ function buildMoveIndex(edges){
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
   });
+
+
 
 
 
