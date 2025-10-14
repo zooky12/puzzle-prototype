@@ -194,7 +194,11 @@ export function draw(state) {
 
   const rows = state.size.rows;
   const cols = state.size.cols;
-  tileSize = Math.floor(canvas.width / cols);
+  // Adjust canvas to grid aspect: width from CSS, height derived from rows/cols
+  const targetW = Math.max(1, Math.floor(canvas.clientWidth || canvas.width || 1));
+  canvas.width = targetW;
+  tileSize = Math.max(1, Math.floor(canvas.width / Math.max(1, cols)));
+  canvas.height = tileSize * Math.max(1, rows);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const exitActive = computeExitActive(state);

@@ -21,10 +21,11 @@ export async function runSolver(initialState, {
   const startHash = hashState(root);
   const visited = new Set([startHash]);
   const queue = [{ state: root, depth: 0, hash: startHash }];
-  const parentMap = new Map([[startHash, { parent: null, move: null, state: root }]]);
+  const parentMap = new Map([[startHash, { parent: null, move: null }]]);
+  const depthByHash = { [startHash]: 0 };
   const processed = new Set();
   const edges = [];
-  const solvableStates = new Set();
+  const goalHashes = new Set();
 
   const dirs = [
     { dx: 1, dy: 0, code: 'd' },
@@ -61,12 +62,13 @@ export async function runSolver(initialState, {
       edges.push({ parent: node.hash, child: childHash, move: dir.code, losing });
       if (losing) continue; // game over states do not count as dead ends
 
-      parentMap.set(childHash, { parent: node.hash, move: dir.code, state: newState });
+      parentMap.set(childHash, { parent: node.hash, move: dir.code });
+      depthByHash[childHash] = node.depth + 1;
 
       if (isWinningState(newState)) {
         const moves = reconstructPath(parentMap, childHash);
         solutionEntries.push({ hash: childHash, moves, length: moves.length });
-        markSolvableFrom(childHash, parentMap, solvableStates);
+        goalHashes.add(childHash);
         if (solutionEntries.length >= maxSolutions) break;
         continue;
       }
@@ -80,13 +82,38 @@ export async function runSolver(initialState, {
     2
   );
 
+  // Build adjacency excluding losing edges
+  const adj = new Map();
+  const revAdj = new Map();
+  for (const e of edges) {
+    if (e.losing) continue;
+    if (!adj.has(e.parent)) adj.set(e.parent, []);
+    if (!revAdj.has(e.child)) revAdj.set(e.child, []);
+    adj.get(e.parent).push(e.child);
+    revAdj.get(e.child).push(e.parent);
+    if (!revAdj.has(e.parent)) revAdj.set(e.parent, revAdj.get(e.parent) || []);
+    if (!adj.has(e.child)) adj.set(e.child, adj.get(e.child) || []);
+  }
+
+  // Compute solvableStates via reverse BFS from all goal hashes
+  const solvableStates = new Set();
+  const q = [];
+  for (const h of goalHashes) { solvableStates.add(h); q.push(h); }
+  while (q.length) {
+    const x = q.shift();
+    const preds = revAdj.get(x) || [];
+    for (const p of preds) {
+      if (!solvableStates.has(p)) { solvableStates.add(p); q.push(p); }
+    }
+  }
+
   const deadEndCandidates = [];
   for (const edge of edges) {
     if (edge.losing) continue; // immediate game over is not a dead end
     if (!solvableStates.has(edge.parent)) continue; // parent first must be solvable
     if (solvableStates.has(edge.child)) continue; // child still solvable -> not a dead end
     if (!processed.has(edge.child)) continue; // ensure child state fully explored within limits
-    if (hasSolvableEscape(edge.child, parentMap, solvableStates, dirs)) continue;
+    if (hasSolvableEscapeAdj(edge.child, solvableStates, adj)) continue;
     const moves = reconstructPath(parentMap, edge.child);
     if (!moves) continue;
     deadEndCandidates.push({ moves, length: moves.length });
@@ -105,6 +132,15 @@ export async function runSolver(initialState, {
       nodesExpanded: nodes,
       rawSolutions: solutionEntries.length,
       rawDeadEnds: deadEndCandidates.length
+    },
+    graph: {
+      startHash,
+      processed,
+      edges,
+      adj,
+      rev: revAdj,
+      depthByHash,
+      goalHashes
     }
   };
 }
@@ -127,29 +163,12 @@ function reconstructPath(parentMap, hash) {
   return moves.join('');
 }
 
-function markSolvableFrom(hash, parentMap, solvableStates) {
-  let current = hash;
-  while (current && !solvableStates.has(current)) {
-    solvableStates.add(current);
-    const meta = parentMap.get(current);
-    if (!meta || meta.parent === null) break;
-    current = meta.parent;
-  }
-}
-
 function tick() {
   return new Promise(resolve => setTimeout(resolve, 0));
 }
 
-function hasSolvableEscape(hash, parentMap, solvableStates, dirs) {
-  const meta = parentMap.get(hash);
-  if (!meta || !meta.state) return false;
-  for (const dir of dirs) {
-    const { newState, changed } = stepMove(meta.state, dir);
-    if (!changed) continue;
-    if (isLosingState(newState)) continue;
-    const nextHash = hashState(newState);
-    if (solvableStates.has(nextHash)) return true;
-  }
+function hasSolvableEscapeAdj(hash, solvableStates, adj) {
+  const outs = adj.get(hash) || [];
+  for (const next of outs) if (solvableStates.has(next)) return true;
   return false;
 }

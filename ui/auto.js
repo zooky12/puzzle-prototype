@@ -1,7 +1,8 @@
 // ui/auto.js
-import { cloneState, removeRow, removeColumn } from '../core/state.js';
+import { cloneState, removeRow, removeColumn, findPlayer } from '../core/state.js';
 import { EntityTypes, isSolid } from '../core/entities.js';
 import { isTrait, getTileTraits } from '../core/tiles.js';
+import { evaluateLevel } from '../solver/evaluator.js';
 
 export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
   const runBtn = document.getElementById('runAuto');
@@ -26,6 +27,29 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     panelEl.setAttribute('aria-hidden', next ? 'false' : 'true');
   });
 
+  // Scoring: reset to defaults
+  const scResetBtn = document.getElementById('scResetDefaults');
+  if (scResetBtn) scResetBtn.addEventListener('click', () => {
+    function setVal(id, v){ const el = document.getElementById(id); if (el) el.value = v; }
+    function setChk(id, v){ const el = document.getElementById(id); if (el) el.checked = !!v; }
+    // Weights
+    setVal('scW_U','1.0'); setVal('scW_D','0.5'); setVal('scW_Fr','0.8'); setVal('scW_S','1.2'); setVal('scW_M','0.6'); setVal('scW_F','1.0'); setVal('scW_Y','0.0');
+    // Bands
+    setChk('scB_U_en',true); setVal('scB_U_min','0.10'); setVal('scB_U_max','1.00');
+    setChk('scB_D_en',false); setVal('scB_D_min','0.00'); setVal('scB_D_max','1.00');
+    setChk('scB_Fr_en',false); setVal('scB_Fr_min','0.00'); setVal('scB_Fr_max','1.00');
+    setChk('scB_S_en',true); setVal('scB_S_min','0.20'); setVal('scB_S_max','1.00');
+    setChk('scB_M_en',false); setVal('scB_M_min','0.00'); setVal('scB_M_max','1.00');
+    setChk('scB_F_en',false); setVal('scB_F_min','0.00'); setVal('scB_F_max','1.00');
+    setChk('scB_Y_en',false); setVal('scB_Y_min','0.00'); setVal('scB_Y_max','1.00');
+    // Params
+    setVal('scP_U_Smax','16'); setVal('scP_S_Lmin','8'); setVal('scP_S_Lmax','30');
+    const kind = document.getElementById('scP_F_kind'); if (kind) kind.value = 'sine';
+    const sym = document.getElementById('scP_Y_sym'); if (sym) sym.value = 'horizontal';
+    // Global
+    setVal('scG_minDedLen','4'); setVal('scG_LminSolv','0');
+  });
+
   document.querySelectorAll('.tile-toggle[data-target]').forEach(btn => {
     const target = document.getElementById(btn.dataset.target);
     if (!target) return;
@@ -39,9 +63,27 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     });
   });
 
-  // Only attach chip toggles inside Auto Creator panels to avoid interfering with Build controls
+  // Tile-chip toggles and select/deselect all within Auto Creator panels
   document.querySelectorAll('.auto-card .tile-filter-panel').forEach(panel => {
     panel.addEventListener('click', (event) => {
+      const selAll = event.target.closest('.select-all');
+      if (selAll) {
+        panel.querySelectorAll('.tile-chip[data-value], .tile-chip[data-option]').forEach(chip => {
+          chip.classList.add('active');
+          chip.setAttribute('aria-pressed', 'true');
+        });
+        event.preventDefault();
+        return;
+      }
+      const deselAll = event.target.closest('.deselect-all');
+      if (deselAll) {
+        panel.querySelectorAll('.tile-chip[data-value], .tile-chip[data-option]').forEach(chip => {
+          chip.classList.remove('active');
+          chip.setAttribute('aria-pressed', 'false');
+        });
+        event.preventDefault();
+        return;
+      }
       const chip = event.target.closest('.tile-chip');
       if (!chip) return;
       const isActive = chip.classList.toggle('active');
@@ -80,6 +122,7 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     originalBase = cloneState(getState());
     const best = [];
     const seen = new Set();
+    let invalidSkipped = 0;
     let duplicateStreak = 0;
     const maxDuplicateStreak = Math.max(100, params.attempts * 2);
     let attemptsDone = 0; // counts only unique + valid tile mutation
@@ -92,7 +135,7 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
         progressEl.textContent = 'Search limit reached (too many invalid/duplicate tries)';
         break;
       }
-      progressEl.textContent = `Attempt ${attemptsDone + 1}/${params.attempts}`;
+      progressEl.textContent = `Attempt ${attemptsDone + 1}/${params.attempts} · skipped:${invalidSkipped}`;
       await tick();
 
       // Always start from the original snapshot taken at Generate start
@@ -120,6 +163,11 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       }
       seen.add(key);
       duplicateStreak = 0;
+      // Validate initial positions after mutations; try relocation before skipping
+      if (!isValidInitialPositions(candidate)) {
+        const fixed = attemptRelocateInvalid(candidate, 3);
+        if (!fixed) { invalidSkipped++; continue; }
+      }
       attemptsDone++; // count only when we have a unique, valid candidate
 
       const result = await runSolver(candidate, {
@@ -130,41 +178,46 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       });
 
       const solutions = Array.isArray(result?.solutions) ? result.solutions : [];
-      const deadEnds = Array.isArray(result?.deadEnds) ? result.deadEnds : [];
       if (solutions.length < 1) continue;
 
-      const fastest = Math.min(...solutions.map(s => s.length));
-      if (solutions.length > params.maxSolutions) continue;
-      if (fastest < params.minFastestSteps) continue;
-      if (deadEnds.length < params.minDeadEnds) continue;
+      // Scoring
+      const cfg = readScoringConfig();
+      const evalRes = evaluateLevel({
+        initialState: candidate,
+        solverResult: result,
+        solverGraph: {
+          startHash: result?.graph?.startHash,
+          processed: result?.graph?.processed,
+          edges: result?.graph?.edges,
+          adj: result?.graph?.adj,
+          rev: result?.graph?.rev,
+          depthByHash: result?.graph?.depthByHash,
+          goalHashes: result?.graph?.goalHashes,
+          moveIndex: buildMoveIndex(result?.graph?.edges)
+        },
+        weights: cfg.weights || {},
+        bands: cfg.bands || {},
+        params: cfg.params || {},
+        gcons: cfg.globalConstraints || { min_dead_end_depth_len: 0 }
+      });
+      if (evalRes.discarded) continue;
 
       // Note: Do not simplify candidates automatically here; user can run Simplify from Build Tools
 
-      // Order candidates by requested preference
-      let score;
-      switch (params.order) {
-        case 'mostDeadEnds':
-          score = [-deadEnds.length, solutions.length, -fastest];
-          break;
-        case 'mostSteps':
-          score = [-fastest, solutions.length, -deadEnds.length];
-          break;
-        case 'leastSolutions':
-        default:
-          score = [solutions.length, -deadEnds.length, -fastest];
-          break;
-      }
-      best.push({ state: cloneState(candidate), solutions, deadEnds, fastest, score });
-      best.sort((a, b) => a.score[0] - b.score[0] || a.score[1] - b.score[1] || a.score[2] - b.score[2]);
+      const fastest = Math.min(...solutions.map(s => s.length));
+      const deadEnds = Array.isArray(result?.deadEnds) ? result.deadEnds : [];
+      const score01 = evalRes.score ?? 0;
+      best.push({ state: cloneState(candidate), solutions, deadEnds, fastest, score01 });
+      best.sort((a, b) => b.score01 - a.score01);
       if (best.length > 20) best.length = 20;
       renderList(best, listEl, onPlaySolution, setState);
     }
 
     const doneMsg = cancel
-      ? 'Canceled'
+      ? `Canceled · candidates:${best.length} · skipped:${invalidSkipped}`
       : (duplicateStreak >= maxDuplicateStreak
-          ? `Done. candidates: ${best.length} (unique space exhausted)`
-          : `Done. candidates: ${best.length}`);
+          ? `Done. candidates: ${best.length} · skipped:${invalidSkipped} (unique space exhausted)`
+          : `Done. candidates: ${best.length} · skipped:${invalidSkipped}`);
     progressEl.textContent = doneMsg;
     runBtn.disabled = false;
     stopBtn.disabled = true;
@@ -220,7 +273,7 @@ function renderList(list, listEl, onPlaySolution, setState) {
 
     const text = document.createElement('div');
     text.className = 'solutionText';
-    text.innerHTML = `#${idx + 1} sols:${c.solutions.length} dead:${c.deadEnds.length} fastest:${c.fastest}`;
+    text.innerHTML = `#${idx + 1} score:${(c.score01||0).toFixed(3)} sols:${c.solutions.length} dead:${c.deadEnds.length} fastest:${c.fastest}`;
     row.appendChild(text);
 
     const actions = document.createElement('div');
@@ -272,12 +325,27 @@ function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
   const sourceSet = new Set(sourceAllowed && sourceAllowed.length ? sourceAllowed : ALL_TILES);
   const targets = targetAllowed && targetAllowed.length ? targetAllowed : ALL_TILES;
 
-  // Build eligible coordinates once (avoid full shuffle)
+  // Compute player-reachable region (4-neigh) and boundary walls
+  const reach = computePlayerReachable(state);
   const eligible = [];
   for (let y = 0; y < state.size.rows; y++) {
     for (let x = 0; x < state.size.cols; x++) {
       const cur = state.base[y][x] || 'floor';
-      if (sourceSet.has(cur)) eligible.push({ x, y, cur });
+      if (!sourceSet.has(cur)) continue;
+      const inReach = reach[y][x];
+      const isWall = isTrait(cur, 'isWallForPlayer');
+      let isBoundary = false;
+      if (isWall) {
+        // Boundary wall if any 4-neighbor is reachable
+        const n4 = [[1,0],[-1,0],[0,1],[0,-1]];
+        for (const [dx,dy] of n4){
+          const nx = x+dx, ny = y+dy;
+          if (ny>=0 && ny<state.size.rows && nx>=0 && nx<state.size.cols){
+            if (reach[ny][nx]) { isBoundary = true; break; }
+          }
+        }
+      }
+      if (inReach || isBoundary) eligible.push({ x, y, cur });
     }
   }
   if (!eligible.length) return false;
@@ -318,6 +386,33 @@ function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
   }
 
   return changes > 0;
+}
+
+function computePlayerReachable(state){
+  const rows = state.size.rows, cols = state.size.cols;
+  const grid = Array.from({length:rows}, ()=> Array(cols).fill(false));
+  const p = findPlayer(state);
+  if (!p) return grid;
+  const q = [];
+  function pass(x,y){
+    const t = state.base[y][x] || 'floor';
+    // Consider holes inside; only walls-for-player block reach
+    return !isTrait(t,'isWallForPlayer');
+  }
+  if (pass(p.x,p.y)) { grid[p.y][p.x] = true; q.push({x:p.x,y:p.y}); }
+  const n4 = [[1,0],[-1,0],[0,1],[0,-1]];
+  while (q.length){
+    const {x,y} = q.shift();
+    for (const [dx,dy] of n4){
+      const nx=x+dx, ny=y+dy;
+      if (ny<0||ny>=rows||nx<0||nx>=cols) continue;
+      if (grid[ny][nx]) continue;
+      if (!pass(nx,ny)) continue;
+      grid[ny][nx] = true;
+      q.push({x:nx,y:ny});
+    }
+  }
+  return grid;
 }
 
 // Randomly move player and place/move boxes/heavyBoxes (one lightweight op per attempt)
@@ -390,6 +485,89 @@ function mutateEntities(state, opts = {}) {
   }
 
   return changed;
+}
+
+function attemptRelocateInvalid(state, maxAttempts = 3){
+  for (let attempt = 0; attempt < maxAttempts; attempt++){
+    if (isValidInitialPositions(state)) return true;
+    // Build fresh occupancy for conflict checks
+    const occ = new Map();
+    for (const e of (state.entities||[])){
+      const k = e.x+","+e.y;
+      if (!occ.has(k)) occ.set(k, []);
+      occ.get(k).push(e);
+    }
+    // Move invalid entities to a random valid cell if available
+    let movedAny = false;
+    for (const e of state.entities){
+      const t = state.base[e.y][e.x] || 'floor';
+      const isP = e.type===EntityTypes.player;
+      const isB = (e.type===EntityTypes.box || e.type===EntityTypes.heavyBox);
+      const here = occ.get(e.x+","+e.y) || [];
+      const conflict = (isP && (here.some(x=>x!==e && (x.type===EntityTypes.fragileWall || x.type===EntityTypes.box || x.type===EntityTypes.heavyBox))))
+                    || (isB && (here.some(x=>x!==e && (x.type===EntityTypes.fragileWall || x.type===EntityTypes.player || x.type===EntityTypes.box || x.type===EntityTypes.heavyBox))));
+      const tileBad = (isP && (isTrait(t,'isWallForPlayer') || isTrait(t,'isHoleForPlayer')))
+                   || (isB && (!allowsBoxTile(t)));
+      if (!(conflict || tileBad)) continue;
+      // Find candidate cells
+      const cells = [];
+      for (let y=0;y<state.size.rows;y++){
+        for (let x=0;x<state.size.cols;x++){
+          const tt = state.base[y][x] || 'floor';
+          if (isP) {
+            if (isTrait(tt,'isWallForPlayer') || isTrait(tt,'isHoleForPlayer')) continue;
+            const anyHere = state.entities.some(ent => ent!==e && ent.x===x && ent.y===y);
+            if (anyHere) continue;
+          } else if (isB) {
+            if (!allowsBoxTile(tt)) continue;
+            const anyBlock = state.entities.some(ent => ent!==e && ent.x===x && ent.y===y && (ent.type===EntityTypes.fragileWall || ent.type===EntityTypes.player || ent.type===EntityTypes.box || ent.type===EntityTypes.heavyBox));
+            if (anyBlock) continue;
+          }
+          cells.push({x,y});
+        }
+      }
+      if (cells.length === 0) return false;
+      const spot = cells[Math.floor(Math.random()*cells.length)];
+      e.x = spot.x; e.y = spot.y;
+      movedAny = true;
+    }
+    if (!movedAny) break;
+  }
+  return isValidInitialPositions(state);
+}
+
+function isValidInitialPositions(state){
+  const tileAt = (x,y)=> (state.base[y][x]||'floor');
+  const isPlayer = (e)=> e.type===EntityTypes.player;
+  const isBoxLike = (e)=> e.type===EntityTypes.box || e.type===EntityTypes.heavyBox;
+  const isFragileEnt = (e)=> e.type===EntityTypes.fragileWall;
+  const supportsPlayer = (t)=> !isTrait(t,'isWallForPlayer') && !isTrait(t,'isHoleForPlayer');
+  const supportsBox = (t)=> !isTrait(t,'isWallForBox') && !isTrait(t,'isHoleForBox');
+
+  // Occupancy per cell
+  const occ = new Map();
+  for (const e of (state.entities||[])){
+    const k = e.x+","+e.y;
+    if (!occ.has(k)) occ.set(k, []);
+    occ.get(k).push(e);
+  }
+  for (const [k, arr] of occ){
+    const hasPlayer = arr.some(isPlayer);
+    const boxes = arr.filter(isBoxLike);
+    const hasFragile = arr.some(isFragileEnt);
+    if (hasPlayer && (boxes.length>0 || hasFragile)) return false;
+    if (boxes.length>1) return false;
+    if (boxes.length>=1 && hasFragile) return false;
+  }
+  for (const e of (state.entities||[])){
+    const t = tileAt(e.x, e.y);
+    if (isPlayer(e)) {
+      if (!supportsPlayer(t)) return false;
+    } else if (isBoxLike(e)) {
+      if (!supportsBox(t)) return false;
+    }
+  }
+  return true;
 }
 
 function randomOther(list, current) {
@@ -649,6 +827,58 @@ function sameSignature(a, b, includeDeads = true) {
 }
 
 function tick() { return new Promise(r => setTimeout(r, 0)); }
+
+function readScoringConfig(){
+  const num = (id, def) => { const el = document.getElementById(id); const v = Number(el?.value); return Number.isFinite(v) ? v : def; };
+  const bool = (id, def=false) => { const el = document.getElementById(id); return el ? !!el.checked : def; };
+  const sel = (id, def) => { const el = document.getElementById(id); return el?.value || def; };
+
+  const weights = {
+    U: num('scW_U', 1.0),
+    D: num('scW_D', 0.5),
+    Fr: num('scW_Fr', 0.8),
+    S: num('scW_S', 1.2),
+    M: num('scW_M', 0.6),
+    F: num('scW_F', 1.0),
+    Y: num('scW_Y', 0.0)
+  };
+
+  const bands = {
+    U: { enabled: bool('scB_U_en', true), min: num('scB_U_min', 0.10), max: num('scB_U_max', 1.00) },
+    D: { enabled: bool('scB_D_en', false), min: num('scB_D_min', 0.00), max: num('scB_D_max', 1.00) },
+    Fr:{ enabled: bool('scB_Fr_en', false), min: num('scB_Fr_min', 0.00), max: num('scB_Fr_max', 1.00) },
+    S: { enabled: bool('scB_S_en', true),  min: num('scB_S_min', 0.20), max: num('scB_S_max', 1.00) },
+    M: { enabled: bool('scB_M_en', false), min: num('scB_M_min', 0.00), max: num('scB_M_max', 1.00) },
+    F: { enabled: bool('scB_F_en', false), min: num('scB_F_min', 0.00), max: num('scB_F_max', 1.00) },
+    Y: { enabled: bool('scB_Y_en', false), min: num('scB_Y_min', 0.00), max: num('scB_Y_max', 1.00) }
+  };
+
+  const params = {
+    U: { S_max: Math.max(1, Math.floor(num('scP_U_Smax', 16))) },
+    S: { L_min: Math.max(1, Math.floor(num('scP_S_Lmin', 8))), L_max: Math.max(2, Math.floor(num('scP_S_Lmax', 30))) },
+    F: { dead_end_h: 1, ideal_kind: sel('scP_F_kind', 'sine') },
+    Y: { sym_mode: sel('scP_Y_sym', 'horizontal') }
+  };
+
+  const globalConstraints = {
+    min_dead_end_depth_len: Math.max(0, Math.floor(num('scG_minDedLen', 4))),
+    L_min_solvable: Math.max(0, Math.floor(num('scG_LminSolv', 0)))
+  };
+
+  return { weights, bands, params, globalConstraints };
+}
+
+function buildMoveIndex(edges){
+  const idx = new Map();
+  if (!Array.isArray(edges)) return idx;
+  for (const e of edges){
+    if (e.losing) continue;
+    if (!idx.has(e.parent)) idx.set(e.parent, new Map());
+    const m = idx.get(e.parent);
+    if (!m.has(e.move)) m.set(e.move, e.child);
+  }
+  return idx;
+}
   // Toggle buttons for entity mutations
   const movePlayerBtn = document.getElementById('autoMovePlayer');
   const placeBoxesBtn = document.getElementById('autoPlaceBoxes');

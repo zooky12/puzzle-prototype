@@ -1,6 +1,7 @@
 // ui/build.js
-import { cloneState, addRow, removeRow, addColumn, removeColumn, compactState } from '../core/state.js';
+import { cloneState, addRow, removeRow, addColumn, removeColumn, compactState, findPlayer } from '../core/state.js';
 import { EntityTypes } from '../core/entities.js';
+import { isTrait } from '../core/tiles.js';
 
 const pushableTypes = new Set([EntityTypes.box, EntityTypes.heavyBox]);
 
@@ -37,7 +38,17 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
   document.getElementById('fill-floor').addEventListener('click', ()=>{
     if (!isBuildMode()) return;
     const s = cloneState(getState());
-    for(let y=0;y<s.size.rows;y++) for(let x=0;x<s.size.cols;x++) s.base[y][x] = 'floor';
+    // Convert to walls all tiles not reachable by the player (4-neighbor flood over base)
+    const p = findPlayer(s);
+    if (!p) return; // no-op if no player
+    const rows = s.size.rows, cols = s.size.cols;
+    const reach = Array.from({length:rows}, ()=> Array(cols).fill(false));
+    const q = [];
+    function pass(x,y){ const t = s.base[y][x]||'floor'; return !isTrait(t,'isWallForPlayer'); }
+    if (pass(p.x,p.y)) { reach[p.y][p.x]=true; q.push({x:p.x,y:p.y}); }
+    const n4 = [[1,0],[-1,0],[0,1],[0,-1]];
+    while(q.length){ const {x,y}=q.shift(); for (const [dx,dy] of n4){ const nx=x+dx, ny=y+dy; if (ny<0||ny>=rows||nx<0||nx>=cols) continue; if (reach[ny][nx]) continue; if (!pass(nx,ny)) continue; reach[ny][nx]=true; q.push({x:nx,y:ny}); } }
+    for (let y=0;y<rows;y++) for (let x=0;x<cols;x++){ if (!reach[y][x]) s.base[y][x] = 'wall'; }
     onSnapshot(); setState(s); onModified(); requestRedraw();
   });
 

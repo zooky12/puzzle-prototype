@@ -438,7 +438,7 @@
             </div>
             <div class="build-actions">
               <button id="clear-btn">Clear</button>
-              <button id="fill-floor">Fill Floor</button>
+              <button id="fill-floor">Fill Walls (non-reachable)</button>
               <button id="place-one">Place 1</button>
               <button id="simplify-keep" title="Simplify level (preserve dead ends)">Simplify (strict)</button>
               <button id="simplify-flex" title="Simplify level (dead ends may change)">Simplify (flex)</button>
@@ -512,19 +512,17 @@
               <label>Attempts
                 <input id="autoAttempts" type="number" value="5000" min="1" />
               </label>
-              <label>Order by
-                <select id="autoOrder">
-                  <option value="leastSolutions" selected>Least Solutions</option>
-                  <option value="mostDeadEnds">Most Dead Ends</option>
-                  <option value="mostSteps">Most Steps</option>
-                </select>
-              </label>
+              
             </div>
             <div class="solver-actions" aria-label="Entity mutations">
               <button id="autoMovePlayer" class="mutate-toggle" aria-pressed="false">Move Player</button>
             </div>
             <button type="button" class="tile-toggle" data-target="autoTilesChange" aria-expanded="false">Tiles allowed to change</button>
             <div class="tile-filter-panel hidden" id="autoTilesChange" aria-hidden="true">
+              <div class="solver-actions" style="margin-bottom:6px">
+                <button type="button" class="select-all">Select All</button>
+                <button type="button" class="deselect-all">Deselect All</button>
+              </div>
               <div class="tile-filter-options">
                 <button type="button" class="tile-chip active" data-value="floor" aria-pressed="true">floor</button>
                 <button type="button" class="tile-chip" data-value="wall" aria-pressed="false">wall</button>
@@ -542,6 +540,10 @@
             </div>
             <button type="button" class="tile-toggle" data-target="autoTilesPlace" aria-expanded="false">Tiles allowed to place</button>
             <div class="tile-filter-panel hidden" id="autoTilesPlace" aria-hidden="true">
+              <div class="solver-actions" style="margin-bottom:6px">
+                <button type="button" class="select-all">Select All</button>
+                <button type="button" class="deselect-all">Deselect All</button>
+              </div>
               <div class="tile-filter-options">
                 <button type="button" class="tile-chip active" data-value="floor" aria-pressed="true">floor</button>
                 <button type="button" class="tile-chip active" data-value="wall" aria-pressed="true">wall</button>
@@ -561,6 +563,54 @@
               <button id="runAuto">Generate</button>
               <button id="stopAuto" disabled>Stop</button>
               <button id="autoRestore" disabled>Restore Original</button>
+            </div>
+            <button type="button" class="tile-toggle" data-target="scoringPanel" aria-expanded="false">Scoring Options</button>
+            <div class="tile-filter-panel hidden" id="scoringPanel" aria-hidden="true">
+              <div class="info-section">
+                <h4>Weights</h4>
+                <div class="solver-grid">
+                  <label title="Fewer solutions → higher score (log-capped)">U (Uniqueness) <input id="scW_U" type="number" step="0.1" value="1.0" /></label>
+                  <label title="Fraction of reachable states that are dead ends">D (Dead-End Density) <input id="scW_D" type="number" step="0.1" value="0.5" /></label>
+                  <label title="Weights early dead ends more; t clamped to [0,L]">Fr (Early Frustration) <input id="scW_Fr" type="number" step="0.1" value="0.8" /></label>
+                  <label title="Shortest path mapped to [L_min,L_max] window">S (Solution Depth) <input id="scW_S" type="number" step="0.1" value="1.2" /></label>
+                  <label title="Entropy of per-step mechanics along a shortest path">M (Mechanic Diversity) <input id="scW_M" type="number" step="0.1" value="0.6" /></label>
+                  <label title="Correlation with ideal build–climax–resolution arc">F (Flow Arc) <input id="scW_F" type="number" step="0.1" value="1.0" /></label>
+                  <label title="Symmetry of the base grid (layout only)">Y (Symmetry) <input id="scW_Y" type="number" step="0.1" value="0.0" /></label>
+                </div>
+              </div>
+              <div class="info-section">
+                <h4>Bands (Hard Filters)</h4>
+                <div class="solver-grid">
+                  <label title="Discard if uniqueness outside [min,max]"><input id="scB_U_en" type="checkbox" checked /> U min <input id="scB_U_min" type="number" min="0" max="1" step="0.01" value="0.1" /> max <input id="scB_U_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if D outside [min,max]"><input id="scB_D_en" type="checkbox" /> D min <input id="scB_D_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_D_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if Fr outside [min,max]"><input id="scB_Fr_en" type="checkbox" /> Fr min <input id="scB_Fr_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_Fr_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if S outside [min,max]"><input id="scB_S_en" type="checkbox" checked /> S min <input id="scB_S_min" type="number" min="0" max="1" step="0.01" value="0.2" /> max <input id="scB_S_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if M outside [min,max]"><input id="scB_M_en" type="checkbox" /> M min <input id="scB_M_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_M_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if F outside [min,max]"><input id="scB_F_en" type="checkbox" /> F min <input id="scB_F_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_F_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if Y outside [min,max]"><input id="scB_Y_en" type="checkbox" /> Y min <input id="scB_Y_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_Y_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                </div>
+              </div>
+              <div class="info-section">
+                <h4>Params</h4>
+                <div class="solver-grid">
+                  <label title="Cap for solutions in U"><span>U · S_max</span> <input id="scP_U_Smax" type="number" min="1" step="1" value="16" /></label>
+                  <label title="Desired shortest-length lower bound"><span>S · L_min</span> <input id="scP_S_Lmin" type="number" min="1" step="1" value="8" /></label>
+                  <label title="Desired shortest-length upper bound"><span>S · L_max</span> <input id="scP_S_Lmax" type="number" min="2" step="1" value="30" /></label>
+                  <label title="Dead-end proximity horizon (fixed at 1)"><span>F · horizon h</span> <input id="scP_F_h" type="number" min="1" max="1" step="1" value="1" /></label>
+                  <label title="Ideal difficulty curve kind"><span>F · ideal</span> <select id="scP_F_kind"><option value="sine" selected>sine</option></select></label>
+                  <label title="Symmetry mode for layout grid"><span>Y · mode</span> <select id="scP_Y_sym"><option value="horizontal" selected>horizontal</option><option value="vertical">vertical</option><option value="rot180">rot180</option></select></label>
+                </div>
+              </div>
+              <div class="info-section">
+                <h4>Global Constraints</h4>
+                <div class="solver-grid">
+                  <label title="Require every dead region to be at least this deep"><span>Min dead-end depth length</span> <input id="scG_minDedLen" type="number" min="0" step="1" value="4" /></label>
+                  <label title="Discard if shortest solution length below this"><span>L_min_solvable (optional)</span> <input id="scG_LminSolv" type="number" min="0" step="1" value="0" /></label>
+                </div>
+              </div>
+              <div class="solver-actions">
+                <button id="scResetDefaults" type="button">Reset to defaults</button>
+              </div>
             </div>
             <div class="progress" id="autoProgress">Idle</div>
             <div id="autoList"></div>
