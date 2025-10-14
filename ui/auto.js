@@ -1,4 +1,4 @@
-// ui/auto.js
+﻿// ui/auto.js
 import { cloneState, removeRow, removeColumn, findPlayer } from '../core/state.js';
 import { EntityTypes, isSolid } from '../core/entities.js';
 import { isTrait, getTileTraits } from '../core/tiles.js';
@@ -27,28 +27,98 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     panelEl.setAttribute('aria-hidden', next ? 'false' : 'true');
   });
 
-  // Scoring: reset to defaults
-  const scResetBtn = document.getElementById('scResetDefaults');
-  if (scResetBtn) scResetBtn.addEventListener('click', () => {
+  // Centralized presets loader
+  function loadScoringPreset(key){
     function setVal(id, v){ const el = document.getElementById(id); if (el) el.value = v; }
     function setChk(id, v){ const el = document.getElementById(id); if (el) el.checked = !!v; }
+    // Default baseline for all presets (bands off unless specified)
+    const presets = {
+      generic: {
+        weights: { U:1.0, D:1.0, Fr:1.0, S:1.0, M:0.5, F:0.5, Y:0.5 },
+        bands:   { U:{en:false,min:0.01,max:1}, S:{en:false,min:0.01,max:1} },
+        params:  { U_Smax:16, S_Lmin:10, S_Lmax:100, F_kind:'sine', Y_sym:'horizontal' },
+        gcons:   { minDead:4, LminSolv:0 }
+      },
+      elegant: {
+        weights: { U:1.2, D:0.8, Fr:0.6, S:1.0, M:0.6, F:1.2, Y:0.6 },
+        bands:   { U:{en:false,min:0.2,max:1}, S:{en:false,min:0.05,max:1} },
+        params:  { U_Smax:16, S_Lmin:12, S_Lmax:60, F_kind:'sine', Y_sym:'horizontal' },
+        gcons:   { minDead:4, LminSolv:0 }
+      },
+      showcase: {
+        weights: { U:0.8, D:0.5, Fr:0.4, S:0.8, M:1.5, F:0.4, Y:0.0 },
+        bands:   { U:{en:false,min:0.01,max:1}, S:{en:false,min:0.01,max:1} },
+        params:  { U_Smax:32, S_Lmin:8, S_Lmax:80, F_kind:'sine', Y_sym:'horizontal' },
+        gcons:   { minDead:4, LminSolv:0 }
+      },
+      exploration: {
+        weights: { U:0.7, D:0.4, Fr:-0.2, S:1.4, M:0.8, F:0.4, Y:0.3 },
+        bands:   { U:{en:false,min:0.01,max:1}, S:{en:false,min:0.01,max:1} },
+        params:  { U_Smax:16, S_Lmin:20, S_Lmax:140, F_kind:'sine', Y_sym:'horizontal' },
+        gcons:   { minDead:4, LminSolv:0 }
+      },
+      punishing: {
+        weights: { U:1.2, D:1.4, Fr:1.2, S:0.9, M:0.3, F:0.6, Y:0.0 },
+        bands:   { U:{en:false,min:0.01,max:1}, S:{en:false,min:0.01,max:1} },
+        params:  { U_Smax:16, S_Lmin:10, S_Lmax:80, F_kind:'sine', Y_sym:'horizontal' },
+        gcons:   { minDead:4, LminSolv:0 }
+      }
+    };
+    const p = presets[key] || presets.generic;
     // Weights
-    setVal('scW_U','1.0'); setVal('scW_D','0.5'); setVal('scW_Fr','0.8'); setVal('scW_S','1.2'); setVal('scW_M','0.6'); setVal('scW_F','1.0'); setVal('scW_Y','0.0');
-    // Bands
-    setChk('scB_U_en',true); setVal('scB_U_min','0.10'); setVal('scB_U_max','1.00');
-    setChk('scB_D_en',false); setVal('scB_D_min','0.00'); setVal('scB_D_max','1.00');
-    setChk('scB_Fr_en',false); setVal('scB_Fr_min','0.00'); setVal('scB_Fr_max','1.00');
-    setChk('scB_S_en',true); setVal('scB_S_min','0.20'); setVal('scB_S_max','1.00');
-    setChk('scB_M_en',false); setVal('scB_M_min','0.00'); setVal('scB_M_max','1.00');
-    setChk('scB_F_en',false); setVal('scB_F_min','0.00'); setVal('scB_F_max','1.00');
-    setChk('scB_Y_en',false); setVal('scB_Y_min','0.00'); setVal('scB_Y_max','1.00');
+    setVal('scW_U', String(p.weights.U)); setVal('scW_D', String(p.weights.D)); setVal('scW_Fr', String(p.weights.Fr)); setVal('scW_S', String(p.weights.S)); setVal('scW_M', String(p.weights.M)); setVal('scW_F', String(p.weights.F)); setVal('scW_Y', String(p.weights.Y));
+    // Bands (only U/S exposed, others remain off by default)
+    setChk('scB_U_en', !!p.bands.U.en); setVal('scB_U_min', String(p.bands.U.min)); setVal('scB_U_max', String(p.bands.U.max));
+    setChk('scB_S_en', !!p.bands.S.en); setVal('scB_S_min', String(p.bands.S.min)); setVal('scB_S_max', String(p.bands.S.max));
+    setChk('scB_D_en', false); setChk('scB_Fr_en', false); setChk('scB_M_en', false); setChk('scB_F_en', false); setChk('scB_Y_en', false);
     // Params
-    setVal('scP_U_Smax','16'); setVal('scP_S_Lmin','8'); setVal('scP_S_Lmax','30');
-    const kind = document.getElementById('scP_F_kind'); if (kind) kind.value = 'sine';
-    const sym = document.getElementById('scP_Y_sym'); if (sym) sym.value = 'horizontal';
-    // Global
-    setVal('scG_minDedLen','4'); setVal('scG_LminSolv','0');
+    setVal('scP_U_Smax', String(p.params.U_Smax)); setVal('scP_S_Lmin', String(p.params.S_Lmin)); setVal('scP_S_Lmax', String(p.params.S_Lmax));
+    const kind = document.getElementById('scP_F_kind'); if (kind) kind.value = p.params.F_kind;
+    const sym  = document.getElementById('scP_Y_sym'); if (sym) sym.value = p.params.Y_sym;
+    // Global constraints
+    setVal('scG_minDedLen', String(p.gcons.minDead)); setVal('scG_LminSolv', String(p.gcons.LminSolv));
+  }
+
+  // Hook up Preset UI
+  const scPresetSelect = document.getElementById('scPresetSelect');
+  const scLoadPresetBtn = document.getElementById('scLoadPreset');
+  if (scLoadPresetBtn) scLoadPresetBtn.addEventListener('click', () => {
+    const key = scPresetSelect?.value || 'generic';
+    if (key === 'custom') {
+      try {
+        const raw = localStorage.getItem('scoringPreset_custom');
+        if (raw) {
+          const cfg = JSON.parse(raw);
+          // Apply custom by writing fields to UI controls
+          // Weights
+          const w = cfg.weights || {};
+          const setV = (id, v)=>{ const el=document.getElementById(id); if (el && v!==undefined) el.value=String(v); };
+          setV('scW_U', w.U); setV('scW_D', w.D); setV('scW_Fr', w.Fr); setV('scW_S', w.S); setV('scW_M', w.M); setV('scW_F', w.F); setV('scW_Y', w.Y);
+          // Bands
+          const b = cfg.bands || {};
+          const setC = (id, v)=>{ const el=document.getElementById(id); if (el && v!==undefined) el.checked=!!v; };
+          const setNum = (id, v)=>{ const el=document.getElementById(id); if (el && v!==undefined) el.value=String(v); };
+          setC('scB_U_en', b.U?.enabled); setNum('scB_U_min', b.U?.min); setNum('scB_U_max', b.U?.max);
+          setC('scB_S_en', b.S?.enabled); setNum('scB_S_min', b.S?.min); setNum('scB_S_max', b.S?.max);
+          // Params
+          const p = cfg.params || {};
+          setNum('scP_U_Smax', p.U?.S_max);
+          setNum('scP_S_Lmin', p.S?.L_min); setNum('scP_S_Lmax', p.S?.L_max);
+          const kind = document.getElementById('scP_F_kind'); if (kind && p.F?.ideal_kind) kind.value = p.F.ideal_kind;
+          const sym  = document.getElementById('scP_Y_sym'); if (sym && p.Y?.sym_mode) sym.value = p.Y.sym_mode;
+          // Global
+          const g = cfg.globalConstraints || {};
+          setNum('scG_minDedLen', g.min_dead_end_depth_len); setNum('scG_LminSolv', g.L_min_solvable);
+        }
+      } catch {}
+    } else {
+      loadScoringPreset(key);
+    }
   });
+  const scResetBtn = document.getElementById('scResetDefaults');
+  if (scResetBtn) scResetBtn.addEventListener('click', () => loadScoringPreset('generic'));
+  // Initialize once
+  loadScoringPreset('generic');
 
   document.querySelectorAll('.tile-toggle[data-target]').forEach(btn => {
     const target = document.getElementById(btn.dataset.target);
@@ -138,17 +208,31 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       progressEl.textContent = `Attempt ${attemptsDone + 1}/${params.attempts} · skipped:${invalidSkipped}`;
       await tick();
 
-      // Always start from the original snapshot taken at Generate start
-      let candidate = cloneState(originalBase);
+      // Choose base: original or sampled from population per genetic ratio
+      const useGA = (params.genUseRatio > 0) && Math.random() < Math.min(1, Math.max(0, params.genUseRatio)) && best.length > 0;
+      let candidate = cloneState(useGA ? sampleParent(best, params.genSkew) : originalBase);
+      if (useGA && Math.random() < (Math.max(0, Math.min(100, params.genCrossoverPct)) / 100) && best.length > 1) {
+        const b2 = cloneState(sampleParent(best, params.genSkew));
+        candidate = crossoverLevels(candidate, b2);
+      }
 
       ensurePlayer(candidate);
 
-      const okTiles = mutateTiles(candidate, params.maxTilesChanged, params.tilesChange, params.tilesPlace);
-      const okEnts  = mutateEntities(candidate, {
-        movePlayer: !!params.movePlayer,
-        placeBoxes: !!params.placeBoxes,
-        removeBoxes: !!params.removeBoxes,
-      });
+      let okTiles = false, okEnts = false;
+      if (params.placeOptimally){
+        const tileChanges = useGA && params.genPopMaxChanges ? params.genPopMaxChanges : params.maxTilesChanged;
+        okTiles = await mutateTilesOptimally(candidate, tileChanges, params.tilesChange, params.tilesPlace, runSolver);
+        if (params.movePlayer) okEnts = await mutateEntitiesOptimally(candidate, { movePlayer: true }, runSolver);
+        if (params.placeBoxes) okEnts = (await mutateEntitiesOptimally(candidate, { placeBoxes: true }, runSolver)) || okEnts;
+      } else {
+        const tileChanges = useGA && params.genPopMaxChanges ? params.genPopMaxChanges : params.maxTilesChanged;
+        okTiles = mutateTiles(candidate, tileChanges, params.tilesChange, params.tilesPlace);
+        okEnts  = mutateEntities(candidate, {
+          movePlayer: !!params.movePlayer,
+          placeBoxes: !!params.placeBoxes,
+          removeBoxes: !!params.removeBoxes,
+        });
+      }
       if (!(okTiles || okEnts)) continue; // neither tiles nor entities changed -> does not count as attempt
 
       // Deduplicate candidates by a stable key
@@ -214,13 +298,24 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     }
 
     const doneMsg = cancel
-      ? `Canceled · candidates:${best.length} · skipped:${invalidSkipped}`
+      ? `Canceled Â· candidates:${best.length} Â· skipped:${invalidSkipped}`
       : (duplicateStreak >= maxDuplicateStreak
-          ? `Done. candidates: ${best.length} · skipped:${invalidSkipped} (unique space exhausted)`
-          : `Done. candidates: ${best.length} · skipped:${invalidSkipped}`);
+          ? `Done. candidates: ${best.length} Â· skipped:${invalidSkipped} (unique space exhausted)`
+          : `Done. candidates: ${best.length} Â· skipped:${invalidSkipped}`);
     progressEl.textContent = doneMsg;
     runBtn.disabled = false;
     stopBtn.disabled = true;
+  });
+
+  // Scoring Presets: Save current into 'custom'
+  const scPresetSelect = document.getElementById('scPresetSelect');
+  const scSavePresetBtn = document.getElementById('scSavePreset');
+  if (scSavePresetBtn) scSavePresetBtn.addEventListener('click', () => {
+    const cfg = readScoringConfig();
+    try {
+      localStorage.setItem('scoringPreset_custom', JSON.stringify(cfg));
+      if (scPresetSelect) scPresetSelect.value = 'custom';
+    } catch {}
   });
 }
 
@@ -250,18 +345,21 @@ function readParams() {
   };
 
   return {
-    maxSolutions: getNum('autoMaxSolutions', 2, 1),
-    minFastestSteps: getNum('autoMinFastest', 12, 1),
-    minDeadEnds: getNum('autoMinDeadEnds', 10, 0),
     maxTilesChanged: getNum('autoMaxChanges', 3, 1),
     attempts: getNum('autoAttempts', 50, 1),
     tilesChange: getSelectedValues('autoTilesChange'),
     tilesPlace: getSelectedValues('autoTilesPlace'),
     maxDepth: getNum('solverMaxDepth', 100, 1),
-    maxNodes: getNum('solverMaxNodes', 200000, 100)
+    maxNodes: getNum('solverMaxNodes', 200000, 100),
+    maxSolutions: getNum('solverMaxSolutions', 50, 1)
     , movePlayer: getToggle('autoMovePlayer')
     , placeBoxes: isOptionSelected('autoTilesPlace', 'placeBoxes')
     , removeBoxes: isOptionSelected('autoTilesChange', 'removeBoxes')
+    , placeOptimally: getToggle('autoPlaceOptimally')
+    , genUseRatio: (()=>{ const el=document.getElementById('genUseRatio'); const v=Number(el?.value); return Number.isFinite(v)? Math.max(0,Math.min(1,v)) : 0; })()
+    , genSkew: (()=>{ const el=document.getElementById('genSkew'); const v=Number(el?.value); return Number.isFinite(v)? Math.max(0,Math.min(1,v)) : 0.5; })()
+    , genCrossoverPct: (()=>{ const el=document.getElementById('genCrossoverPct'); const v=Number(el?.value); return Number.isFinite(v)? Math.max(0,Math.min(100,v)) : 10; })()
+    , genPopMaxChanges: (()=>{ const el=document.getElementById('genPopMaxChanges'); const v=Number(el?.value); return Number.isFinite(v)? Math.max(1,Math.floor(v)) : null; })()
   };
 }
 
@@ -388,6 +486,139 @@ function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
   return changes > 0;
 }
 
+// Greedy step-by-step placement for one chosen target tile type per step
+async function mutateTilesOptimally(state, maxChanges, sourceAllowed, targetAllowed, runSolver){
+  const sourceSet = new Set(sourceAllowed && sourceAllowed.length ? sourceAllowed : ALL_TILES);
+  const targets = targetAllowed && targetAllowed.length ? targetAllowed.slice() : ALL_TILES.slice();
+  if (!targets.length) return false;
+  const reach = computePlayerReachable(state);
+  let changed = false;
+  const cfg = readScoringConfig();
+  // Baseline score
+  async function scoreOf(s){
+    const res = await runSolver(s, { maxDepth: cfg.params?.S?.L_max || 100, maxNodes: 200000, maxSolutions: Math.max(cfg?.weights?.U? 50:10, 1), onProgress: () => {} });
+    if (!res || !Array.isArray(res.solutions)) return { ok:false, score:-Infinity };
+    const evalRes = evaluateLevel({
+      initialState: s,
+      solverResult: res,
+      solverGraph: { startHash: res?.graph?.startHash, processed: res?.graph?.processed, edges: res?.graph?.edges, adj: res?.graph?.adj, rev: res?.graph?.rev, depthByHash: res?.graph?.depthByHash, goalHashes: res?.graph?.goalHashes, moveIndex: buildMoveIndex(res?.graph?.edges) },
+      weights: cfg.weights || {}, bands: cfg.bands || {}, params: cfg.params || {}, gcons: cfg.globalConstraints || { min_dead_end_depth_len: 0 }
+    });
+    if (evalRes.discarded) return { ok:false, score:-Infinity };
+    return { ok:true, score: evalRes.score ?? 0 };
+  }
+  const baseScoreObj = await scoreOf(state);
+  let baseScore = baseScoreObj.ok ? baseScoreObj.score : -Infinity;
+
+  for (let step=0; step<maxChanges; step++){
+    // Pick a target type for this step
+    const pick = targets[Math.floor(Math.random()*targets.length)];
+    let bestDelta = 0, bestPos = null, bestIsEntity = false;
+    // Scan all eligible cells for this type
+    for (let y=0; y<state.size.rows; y++){
+      for (let x=0; x<state.size.cols; x++){
+        if (!reach[y][x]) continue;
+        const cur = state.base[y][x] || 'floor';
+        if (!sourceSet.has(cur)) continue;
+        // Box/fragile entity overlay rule
+        const boxAt = state.entities?.some(e => (e.type===EntityTypes.box || e.type===EntityTypes.heavyBox) && e.x===x && e.y===y);
+        if (boxAt && (isTrait(pick,'isWallForBox') || isTrait(pick,'isHoleForBox'))) continue;
+        // Simulate change
+        const test = cloneState(state);
+        if (pick === 'fragileWall'){
+          const solidHere = test.entities?.some(e => isSolid(e) && e.x===x && e.y===y);
+          if (solidHere) continue;
+          test.entities.push({ type: EntityTypes.fragileWall, x, y, underTile: cur });
+        } else {
+          if (cur === pick) continue;
+          test.base[y][x] = pick;
+        }
+        if (!isValidInitialPositions(test)){
+          if (!attemptRelocateInvalid(test, 2)) continue;
+        }
+        const sObj = await scoreOf(test);
+        if (!sObj.ok) continue;
+        const delta = sObj.score - baseScore;
+        if (delta > bestDelta){ bestDelta = delta; bestPos = {x,y}; bestIsEntity = (pick==='fragileWall'); }
+      }
+    }
+    // Also optionally consider entity operations (move player / place box) when toggles are on via mutateEntitiesOptimally, handled separately by caller
+    if (bestPos && bestDelta > 0){
+      // apply best change
+      const {x,y} = bestPos;
+      if (bestIsEntity){
+        state.entities.push({ type: EntityTypes.fragileWall, x, y, underTile: state.base[y][x]||'floor' });
+      } else {
+        state.base[y][x] = pick;
+      }
+      changed = true;
+      // update base score
+      const sObj2 = await scoreOf(state);
+      if (sObj2.ok) baseScore = sObj2.score;
+    } else {
+      break; // no improvement for this step
+    }
+  }
+  return changed;
+}
+
+async function mutateEntitiesOptimally(state, opts, runSolver){
+  let changed = false;
+  const cfg = readScoringConfig();
+  async function scoreOf(s){
+    const res = await runSolver(s, { maxDepth: cfg.params?.S?.L_max || 100, maxNodes: 200000, maxSolutions: Math.max(cfg?.weights?.U? 50:10, 1), onProgress: () => {} });
+    if (!res || !Array.isArray(res.solutions)) return { ok:false, score:-Infinity };
+    const evalRes = evaluateLevel({ initialState: s, solverResult: res, solverGraph: { startHash: res?.graph?.startHash, processed: res?.graph?.processed, edges: res?.graph?.edges, adj: res?.graph?.adj, rev: res?.graph?.rev, depthByHash: res?.graph?.depthByHash, goalHashes: res?.graph?.goalHashes, moveIndex: buildMoveIndex(res?.graph?.edges) }, weights: cfg.weights||{}, bands: cfg.bands||{}, params: cfg.params||{}, gcons: cfg.globalConstraints||{min_dead_end_depth_len:0} });
+    if (evalRes.discarded) return { ok:false, score:-Infinity };
+    return { ok:true, score: evalRes.score ?? 0 };
+  }
+  const baseScoreObj = await scoreOf(state);
+  let baseScore = baseScoreObj.ok ? baseScoreObj.score : -Infinity;
+  const reach = computePlayerReachable(state);
+  // Move player
+  if (opts.movePlayer){
+    const idx = state.entities.findIndex(e => e.type===EntityTypes.player);
+    if (idx >= 0){
+      const p = state.entities[idx];
+      let best = null, bestDelta = 0;
+      for (let y=0;y<state.size.rows;y++) for (let x=0;x<state.size.cols;x++){
+        if (!reach[y][x]) continue;
+        const t = state.base[y][x]||'floor';
+        if (isTrait(t,'isWallForPlayer')||isTrait(t,'isHoleForPlayer')) continue;
+        const anyHere = state.entities.some(e=> e!==p && e.x===x && e.y===y);
+        if (anyHere) continue;
+        const test = cloneState(state);
+        const pp = test.entities.find(e=>e.type===EntityTypes.player);
+        pp.x = x; pp.y = y; pp.state = { mode:'free', entryDir:{dx:0,dy:0} };
+        if (!isValidInitialPositions(test)) if (!attemptRelocateInvalid(test,1)) continue;
+        const sObj = await scoreOf(test); if (!sObj.ok) continue;
+        const d = sObj.score - baseScore; if (d>bestDelta){ bestDelta=d; best={x,y}; }
+      }
+      if (best && bestDelta>0){ p.x=best.x; p.y=best.y; p.state={mode:'free',entryDir:{dx:0,dy:0}}; changed=true; const sObj2=await scoreOf(state); if (sObj2.ok) baseScore=sObj2.score; }
+    }
+  }
+  // Place a box/heavyBox
+  if (opts.placeBoxes){
+    let best = null, bestDelta = 0, bestType = EntityTypes.box;
+    for (let y=0;y<state.size.rows;y++) for (let x=0;x<state.size.cols;x++){
+      if (!reach[y][x]) continue;
+      const t = state.base[y][x]||'floor';
+      if (!allowsBoxTile(t)) continue;
+      const anyBlock = state.entities.some(e=> (e.x===x && e.y===y));
+      if (anyBlock) continue;
+      for (const type of [EntityTypes.box, EntityTypes.heavyBox]){
+        const test = cloneState(state);
+        test.entities.push({ type, x, y });
+        if (!isValidInitialPositions(test)) if (!attemptRelocateInvalid(test,1)) continue;
+        const sObj = await scoreOf(test); if (!sObj.ok) continue;
+        const d = sObj.score - baseScore; if (d>bestDelta){ bestDelta=d; best={x,y}; bestType=type; }
+      }
+    }
+    if (best && bestDelta>0){ state.entities.push({ type: bestType, x: best.x, y: best.y }); changed=true; }
+  }
+  return changed;
+}
+
 function computePlayerReachable(state){
   const rows = state.size.rows, cols = state.size.cols;
   const grid = Array.from({length:rows}, ()=> Array(cols).fill(false));
@@ -413,6 +644,49 @@ function computePlayerReachable(state){
     }
   }
   return grid;
+}
+
+// Rank-weighted parent sampling
+function sampleParent(best, skew){
+  const n = Math.min(best.length, 20);
+  if (n <= 1 || skew >= 0.999) return cloneState(best[0].state);
+  if (skew <= 0){ const idx = Math.floor(Math.random()*n); return cloneState(best[idx].state); }
+  const targetRatio = 1 / Math.max(1e-6, (1 - skew));
+  const tau = (n - 1) / Math.log(targetRatio);
+  const weights = Array.from({length:n}, (_,i)=> Math.exp(-(i)/tau));
+  const sum = weights.reduce((a,b)=>a+b,0);
+  let r = Math.random()*sum;
+  for (let i=0;i<n;i++){ r -= weights[i]; if (r<=0) return cloneState(best[i].state); }
+  return cloneState(best[n-1].state);
+}
+
+function crossoverLevels(a, b){
+  const A = cloneState(a), B = cloneState(b);
+  if (A.size.rows!==B.size.rows || A.size.cols!==B.size.cols) return A; // fallback
+  const rows=A.size.rows, cols=A.size.cols;
+  const out = cloneState(A);
+  const vertical = Math.random()<0.5;
+  if (vertical){
+    const cut = Math.floor(cols/2);
+    for (let y=0;y<rows;y++) for (let x=cut;x<cols;x++) out.base[y][x]=B.base[y][x];
+  } else {
+    const cut = Math.floor(rows/2);
+    for (let y=cut;y<rows;y++) for (let x=0;x<cols;x++) out.base[y][x]=B.base[y][x];
+  }
+  // Entities: player from A, boxes merge (avoid conflicts), fragileWalls prefer B on its half
+  const merged = [];
+  const isLeftHalf = (x)=> vertical ? (x<Math.floor(cols/2)) : true;
+  const isTopHalf  = (y)=> !vertical ? (y<Math.floor(rows/2)) : true;
+  const keepFromA = new Set();
+  // Player from A
+  const plA = A.entities.find(e=>e.type===EntityTypes.player);
+  if (plA) merged.push({ ...plA, state: { mode:'free', entryDir:{dx:0,dy:0} } });
+  const occ = (x,y,list)=> list.some(e=> e.x===x && e.y===y);
+  function pushIfFree(e){ if (!occ(e.x,e.y,merged)) merged.push({ ...e }); }
+  for (const e of A.entities){ if (e.type!==EntityTypes.player) pushIfFree(e); }
+  for (const e of B.entities){ if (e.type!==EntityTypes.player) pushIfFree(e); }
+  out.entities = merged;
+  return out;
 }
 
 // Randomly move player and place/move boxes/heavyBoxes (one lightweight op per attempt)
@@ -891,3 +1165,6 @@ function buildMoveIndex(edges){
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
   });
+
+
+

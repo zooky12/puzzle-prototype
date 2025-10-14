@@ -512,6 +512,25 @@
               <label>Attempts
                 <input id="autoAttempts" type="number" value="5000" min="1" />
               </label>
+              <label title="Greedy tile/entity placement per mutation step">
+                <input id="autoPlaceOptimally" type="checkbox" /> Place optimally
+              </label>
+              <label title="Use population with this probability (0..1); 0 disables">
+                Use Genetic (ratio)
+                <input id="genUseRatio" type="number" min="0" max="1" step="0.05" value="0" />
+              </label>
+              <label title="0 uniform over top; 1 always pick top">
+                Parent Skew
+                <input id="genSkew" type="number" min="0" max="1" step="0.05" value="0.5" />
+              </label>
+              <label title="Chance to crossover two parents (population attempts)">
+                Crossover %
+                <input id="genCrossoverPct" type="number" min="0" max="100" step="1" value="10" />
+              </label>
+              <label title="Override Max tiles changed for population attempts (blank = use above)">
+                Pop Mutations
+                <input id="genPopMaxChanges" type="number" min="1" step="1" value="2" />
+              </label>
               
             </div>
             <div class="solver-actions" aria-label="Entity mutations">
@@ -581,10 +600,10 @@
               <div class="info-section">
                 <h4>Bands (Hard Filters)</h4>
                 <div class="solver-grid">
-                  <label title="Discard if uniqueness outside [min,max]"><input id="scB_U_en" type="checkbox" checked /> U min <input id="scB_U_min" type="number" min="0" max="1" step="0.01" value="0.1" /> max <input id="scB_U_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if uniqueness outside [min,max]"><input id="scB_U_en" type="checkbox" /> U min <input id="scB_U_min" type="number" min="0" max="1" step="0.01" value="0.01" /> max <input id="scB_U_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
                   <label title="Discard if D outside [min,max]"><input id="scB_D_en" type="checkbox" /> D min <input id="scB_D_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_D_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
                   <label title="Discard if Fr outside [min,max]"><input id="scB_Fr_en" type="checkbox" /> Fr min <input id="scB_Fr_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_Fr_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
-                  <label title="Discard if S outside [min,max]"><input id="scB_S_en" type="checkbox" checked /> S min <input id="scB_S_min" type="number" min="0" max="1" step="0.01" value="0.2" /> max <input id="scB_S_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
+                  <label title="Discard if S outside [min,max]"><input id="scB_S_en" type="checkbox" /> S min <input id="scB_S_min" type="number" min="0" max="1" step="0.01" value="0.01" /> max <input id="scB_S_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
                   <label title="Discard if M outside [min,max]"><input id="scB_M_en" type="checkbox" /> M min <input id="scB_M_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_M_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
                   <label title="Discard if F outside [min,max]"><input id="scB_F_en" type="checkbox" /> F min <input id="scB_F_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_F_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
                   <label title="Discard if Y outside [min,max]"><input id="scB_Y_en" type="checkbox" /> Y min <input id="scB_Y_min" type="number" min="0" max="1" step="0.01" value="0" /> max <input id="scB_Y_max" type="number" min="0" max="1" step="0.01" value="1" /></label>
@@ -609,6 +628,19 @@
                 </div>
               </div>
               <div class="solver-actions">
+                <label style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                  <span>Preset</span>
+                  <select id="scPresetSelect">
+                    <option value="generic" selected>Generic</option>
+                    <option value="elegant">Elegant Campaign</option>
+                    <option value="showcase">Mechanic Showcase</option>
+                    <option value="exploration">Exploration</option>
+                    <option value="punishing">Punishing / Frustrating</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <button id="scLoadPreset" type="button">Load</button>
+                  <button id="scSavePreset" type="button">Save</button>
+                </label>
                 <button id="scResetDefaults" type="button">Reset to defaults</button>
               </div>
             </div>

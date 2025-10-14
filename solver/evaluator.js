@@ -404,7 +404,7 @@ export function applyBands(metrics, bands){
   return { ok:true };
 }
 
-export function combineScore(metrics, weights){
+export function combineScore(metrics, weights, { mapSigned=true } = {}){
   const active = HeuristicKeys.filter(k => (weights[k]||0) !== 0 && (k in metrics));
   const eff = l1NormalizeWeights(weights, active);
   let signed = 0;
@@ -417,10 +417,11 @@ export function combineScore(metrics, weights){
     if (active.includes(k)) signed += contrib;
     breakdown[k] = { metric: m, weight_input: (weights[k]||0), weight_eff: w, contribution: contrib };
   }
-  return { score_signed: signed, score01: signedTo01(signed), breakdown };
+  const score01 = mapSigned ? signedTo01(signed) : clamp01(signed);
+  return { score_signed: signed, score01, breakdown };
 }
 
-export function evaluateLevel({ initialState, solverResult, solverGraph, weights={}, bands={}, params={}, gcons }){
+export function evaluateLevel({ initialState, solverResult, solverGraph, weights={}, bands={}, params={}, gcons, mapSigned=true }){
   // Hard filters
   if (!solverResult || !Array.isArray(solverResult.solutions)){
     return { discarded:true, discard_reason:'unsolvable' };
@@ -451,6 +452,6 @@ export function evaluateLevel({ initialState, solverResult, solverGraph, weights
   const { ok, reason } = applyBands(metrics, bands || {});
   if (!ok) return { discarded:true, discard_reason:reason };
 
-  const { score_signed, score01, breakdown } = combineScore(metrics, weights || {});
+  const { score_signed, score01, breakdown } = combineScore(metrics, weights || {}, { mapSigned });
   return { discarded:false, metrics, score: score01, score_signed, breakdown };
 }
