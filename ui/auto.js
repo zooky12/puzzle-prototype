@@ -27,6 +27,17 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     panelEl.setAttribute('aria-hidden', next ? 'false' : 'true');
   });
 
+  function getSolverLimits() {
+    const md = Number(document.getElementById('solverMaxDepth')?.value);
+    const mn = Number(document.getElementById('solverMaxNodes')?.value);
+    const ms = Number(document.getElementById('solverMaxSolutions')?.value);
+    return {
+      maxDepth: Number.isFinite(md) ? md : 100,
+      maxNodes: Number.isFinite(mn) ? mn : 200000,
+      maxSolutions: Number.isFinite(ms) ? Math.max(1, ms) : 50
+    };
+  }
+
   // Centralized presets loader
   function loadScoringPreset(key){
     function setVal(id, v){ const el = document.getElementById(id); if (el) el.value = v; }
@@ -199,13 +210,13 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     let tries = 0;        // total generation tries (including skipped)
     const hardCap = Math.max(1000, params.attempts * 50);
 
-    while (attemptsDone < params.attempts && !cancel) {
+  while (attemptsDone < params.attempts && !cancel) {
       tries++;
       if (tries > hardCap) {
         progressEl.textContent = 'Search limit reached (too many invalid/duplicate tries)';
         break;
       }
-      progressEl.textContent = `Attempt ${attemptsDone + 1}/${params.attempts} · skipped:${invalidSkipped}`;
+      progressEl.textContent = 'Attempt ' + (attemptsDone + 1) + '/' + params.attempts + ' - skipped:' + invalidSkipped;
       await tick();
 
       // Choose base: original or sampled from population per genetic ratio
@@ -221,9 +232,9 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       let okTiles = false, okEnts = false;
       if (params.placeOptimally){
         const tileChanges = useGA && params.genPopMaxChanges ? params.genPopMaxChanges : params.maxTilesChanged;
-        okTiles = await mutateTilesOptimally(candidate, tileChanges, params.tilesChange, params.tilesPlace, runSolver);
-        if (params.movePlayer) okEnts = await mutateEntitiesOptimally(candidate, { movePlayer: true }, runSolver);
-        if (params.placeBoxes) okEnts = (await mutateEntitiesOptimally(candidate, { placeBoxes: true }, runSolver)) || okEnts;
+        okTiles = await mutateTilesOptimally(candidate, tileChanges, params.tilesChange, params.tilesPlace, runSolver, getSolverLimits());
+        if (params.movePlayer) okEnts = await mutateEntitiesOptimally(candidate, { movePlayer: true }, runSolver, getSolverLimits());
+        if (params.placeBoxes) okEnts = (await mutateEntitiesOptimally(candidate, { placeBoxes: true }, runSolver, getSolverLimits())) || okEnts;
       } else {
         const tileChanges = useGA && params.genPopMaxChanges ? params.genPopMaxChanges : params.maxTilesChanged;
         okTiles = mutateTiles(candidate, tileChanges, params.tilesChange, params.tilesPlace);
@@ -247,11 +258,8 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
       }
       seen.add(key);
       duplicateStreak = 0;
-      // Validate initial positions after mutations; try relocation before skipping
-      if (!isValidInitialPositions(candidate)) {
-        const fixed = attemptRelocateInvalid(candidate, 3);
-        if (!fixed) { invalidSkipped++; continue; }
-      }
+      // Validate initial positions after mutations; do not relocate (skip invalid)
+      if (!isValidInitialPositions(candidate)) { invalidSkipped++; continue; }
       attemptsDone++; // count only when we have a unique, valid candidate
 
       const result = await runSolver(candidate, {
@@ -282,7 +290,8 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
         weights: cfg.weights || {},
         bands: cfg.bands || {},
         params: cfg.params || {},
-        gcons: cfg.globalConstraints || { min_dead_end_depth_len: 0 }
+        gcons: cfg.globalConstraints || { min_dead_end_depth_len: 0 },
+        mapSigned: cfg.mapSigned !== false
       });
       if (evalRes.discarded) continue;
 
@@ -308,7 +317,7 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
   });
 
   // Scoring Presets: Save current into 'custom'
-  const scPresetSelect = document.getElementById('scPresetSelect');
+  // Use existing scPresetSelect; only declare Save button here
   const scSavePresetBtn = document.getElementById('scSavePreset');
   if (scSavePresetBtn) scSavePresetBtn.addEventListener('click', () => {
     const cfg = readScoringConfig();
@@ -402,6 +411,7 @@ function ensurePlayer(state) {
   const canStand = (x, y) => {
     const t = (state.base[y][x] || 'floor');
     if (isTrait(t, 'isWallForPlayer') || isTrait(t, 'isHoleForPlayer')) return false;
+    if ((state.base[y][x] || 'floor') === 'exit') return false; // avoid trivial start on exit
     const anyHere = state.entities?.some(e => e.x === x && e.y === y);
     return !anyHere;
   };
@@ -423,27 +433,13 @@ function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
   const sourceSet = new Set(sourceAllowed && sourceAllowed.length ? sourceAllowed : ALL_TILES);
   const targets = targetAllowed && targetAllowed.length ? targetAllowed : ALL_TILES;
 
-  // Compute player-reachable region (4-neigh) and boundary walls
-  const reach = computePlayerReachable(state);
+  // Without reachable/boundary restriction: consider all cells whose current type is allowed to change
   const eligible = [];
   for (let y = 0; y < state.size.rows; y++) {
     for (let x = 0; x < state.size.cols; x++) {
       const cur = state.base[y][x] || 'floor';
       if (!sourceSet.has(cur)) continue;
-      const inReach = reach[y][x];
-      const isWall = isTrait(cur, 'isWallForPlayer');
-      let isBoundary = false;
-      if (isWall) {
-        // Boundary wall if any 4-neighbor is reachable
-        const n4 = [[1,0],[-1,0],[0,1],[0,-1]];
-        for (const [dx,dy] of n4){
-          const nx = x+dx, ny = y+dy;
-          if (ny>=0 && ny<state.size.rows && nx>=0 && nx<state.size.cols){
-            if (reach[ny][nx]) { isBoundary = true; break; }
-          }
-        }
-      }
-      if (inReach || isBoundary) eligible.push({ x, y, cur });
+      eligible.push({ x, y, cur });
     }
   }
   if (!eligible.length) return false;
@@ -487,59 +483,58 @@ function mutateTiles(state, maxChanges, sourceAllowed, targetAllowed) {
 }
 
 // Greedy step-by-step placement for one chosen target tile type per step
-async function mutateTilesOptimally(state, maxChanges, sourceAllowed, targetAllowed, runSolver){
+async function mutateTilesOptimally(state, maxChanges, sourceAllowed, targetAllowed, runSolver, limits){
   const sourceSet = new Set(sourceAllowed && sourceAllowed.length ? sourceAllowed : ALL_TILES);
   const targets = targetAllowed && targetAllowed.length ? targetAllowed.slice() : ALL_TILES.slice();
   if (!targets.length) return false;
-  const reach = computePlayerReachable(state);
   let changed = false;
   const cfg = readScoringConfig();
   // Baseline score
   async function scoreOf(s){
-    const res = await runSolver(s, { maxDepth: cfg.params?.S?.L_max || 100, maxNodes: 200000, maxSolutions: Math.max(cfg?.weights?.U? 50:10, 1), onProgress: () => {} });
+    const res = await runSolver(s, { ...(limits||{}), onProgress: () => {} });
     if (!res || !Array.isArray(res.solutions)) return { ok:false, score:-Infinity };
     const evalRes = evaluateLevel({
       initialState: s,
       solverResult: res,
       solverGraph: { startHash: res?.graph?.startHash, processed: res?.graph?.processed, edges: res?.graph?.edges, adj: res?.graph?.adj, rev: res?.graph?.rev, depthByHash: res?.graph?.depthByHash, goalHashes: res?.graph?.goalHashes, moveIndex: buildMoveIndex(res?.graph?.edges) },
-      weights: cfg.weights || {}, bands: cfg.bands || {}, params: cfg.params || {}, gcons: cfg.globalConstraints || { min_dead_end_depth_len: 0 }
+      weights: cfg.weights || {}, bands: cfg.bands || {}, params: cfg.params || {}, gcons: cfg.globalConstraints || { min_dead_end_depth_len: 0 }, mapSigned: cfg.mapSigned !== false
     });
     if (evalRes.discarded) return { ok:false, score:-Infinity };
-    return { ok:true, score: evalRes.score ?? 0 };
+    const L = Array.isArray(res.solutions) && res.solutions.length ? Math.min(...res.solutions.map(x=>x.length)) : 0;
+    return { ok:true, score: (evalRes.score ?? 0), L };
   }
   const baseScoreObj = await scoreOf(state);
   let baseScore = baseScoreObj.ok ? baseScoreObj.score : -Infinity;
 
   for (let step=0; step<maxChanges; step++){
     // Pick a target type for this step
-    const pick = targets[Math.floor(Math.random()*targets.length)];
-    let bestDelta = 0, bestPos = null, bestIsEntity = false;
-    // Scan all eligible cells for this type
-    for (let y=0; y<state.size.rows; y++){
-      for (let x=0; x<state.size.cols; x++){
-        if (!reach[y][x]) continue;
-        const cur = state.base[y][x] || 'floor';
-        if (!sourceSet.has(cur)) continue;
-        // Box/fragile entity overlay rule
-        const boxAt = state.entities?.some(e => (e.type===EntityTypes.box || e.type===EntityTypes.heavyBox) && e.x===x && e.y===y);
-        if (boxAt && (isTrait(pick,'isWallForBox') || isTrait(pick,'isHoleForBox'))) continue;
-        // Simulate change
-        const test = cloneState(state);
-        if (pick === 'fragileWall'){
-          const solidHere = test.entities?.some(e => isSolid(e) && e.x===x && e.y===y);
-          if (solidHere) continue;
-          test.entities.push({ type: EntityTypes.fragileWall, x, y, underTile: cur });
-        } else {
-          if (cur === pick) continue;
-          test.base[y][x] = pick;
+    let bestDelta = 0, bestPos = null, bestIsEntity = false, bestType = null, bestL = -1;
+    for (const pick of targets){
+      for (let y=0; y<state.size.rows; y++){
+        for (let x=0; x<state.size.cols; x++){
+          const cur = state.base[y][x] || 'floor';
+          if (!sourceSet.has(cur)) continue;
+          // Box/fragile entity overlay rule
+          const boxAt = state.entities?.some(e => (e.type===EntityTypes.box || e.type===EntityTypes.heavyBox) && e.x===x && e.y===y);
+          if (boxAt && (isTrait(pick,'isWallForBox') || isTrait(pick,'isHoleForBox'))) continue;
+          // Simulate change
+          const test = cloneState(state);
+          if (pick === 'fragileWall'){
+            const solidHere = test.entities?.some(e => isSolid(e) && e.x===x && e.y===y);
+            if (solidHere) continue;
+            test.entities.push({ type: EntityTypes.fragileWall, x, y, underTile: cur });
+          } else {
+            if (cur === pick) continue;
+            test.base[y][x] = pick;
+          }
+          if (!isValidInitialPositions(test)) continue; // do not relocate for this test
+          const sObj = await scoreOf(test);
+          if (!sObj.ok) continue;
+          const delta = sObj.score - baseScore;
+          if (delta > bestDelta || (Math.abs(delta - bestDelta) <= 1e-9 && sObj.L > bestL)){
+            bestDelta = delta; bestPos = {x,y}; bestIsEntity = (pick==='fragileWall'); bestType = pick; bestL = sObj.L;
+          }
         }
-        if (!isValidInitialPositions(test)){
-          if (!attemptRelocateInvalid(test, 2)) continue;
-        }
-        const sObj = await scoreOf(test);
-        if (!sObj.ok) continue;
-        const delta = sObj.score - baseScore;
-        if (delta > bestDelta){ bestDelta = delta; bestPos = {x,y}; bestIsEntity = (pick==='fragileWall'); }
       }
     }
     // Also optionally consider entity operations (move player / place box) when toggles are on via mutateEntitiesOptimally, handled separately by caller
@@ -549,7 +544,7 @@ async function mutateTilesOptimally(state, maxChanges, sourceAllowed, targetAllo
       if (bestIsEntity){
         state.entities.push({ type: EntityTypes.fragileWall, x, y, underTile: state.base[y][x]||'floor' });
       } else {
-        state.base[y][x] = pick;
+        state.base[y][x] = bestType;
       }
       changed = true;
       // update base score
@@ -562,29 +557,29 @@ async function mutateTilesOptimally(state, maxChanges, sourceAllowed, targetAllo
   return changed;
 }
 
-async function mutateEntitiesOptimally(state, opts, runSolver){
+async function mutateEntitiesOptimally(state, opts, runSolver, limits){
   let changed = false;
   const cfg = readScoringConfig();
   async function scoreOf(s){
-    const res = await runSolver(s, { maxDepth: cfg.params?.S?.L_max || 100, maxNodes: 200000, maxSolutions: Math.max(cfg?.weights?.U? 50:10, 1), onProgress: () => {} });
+    const res = await runSolver(s, { ...(limits||{}), onProgress: () => {} });
     if (!res || !Array.isArray(res.solutions)) return { ok:false, score:-Infinity };
-    const evalRes = evaluateLevel({ initialState: s, solverResult: res, solverGraph: { startHash: res?.graph?.startHash, processed: res?.graph?.processed, edges: res?.graph?.edges, adj: res?.graph?.adj, rev: res?.graph?.rev, depthByHash: res?.graph?.depthByHash, goalHashes: res?.graph?.goalHashes, moveIndex: buildMoveIndex(res?.graph?.edges) }, weights: cfg.weights||{}, bands: cfg.bands||{}, params: cfg.params||{}, gcons: cfg.globalConstraints||{min_dead_end_depth_len:0} });
+    const evalRes = evaluateLevel({ initialState: s, solverResult: res, solverGraph: { startHash: res?.graph?.startHash, processed: res?.graph?.processed, edges: res?.graph?.edges, adj: res?.graph?.adj, rev: res?.graph?.rev, depthByHash: res?.graph?.depthByHash, goalHashes: res?.graph?.goalHashes, moveIndex: buildMoveIndex(res?.graph?.edges) }, weights: cfg.weights||{}, bands: cfg.bands||{}, params: cfg.params||{}, gcons: cfg.globalConstraints||{min_dead_end_depth_len:0}, mapSigned: cfg.mapSigned !== false });
     if (evalRes.discarded) return { ok:false, score:-Infinity };
-    return { ok:true, score: evalRes.score ?? 0 };
+    const L = Array.isArray(res.solutions) && res.solutions.length ? Math.min(...res.solutions.map(x=>x.length)) : 0;
+    return { ok:true, score: (evalRes.score ?? 0), L };
   }
   const baseScoreObj = await scoreOf(state);
   let baseScore = baseScoreObj.ok ? baseScoreObj.score : -Infinity;
-  const reach = computePlayerReachable(state);
   // Move player
   if (opts.movePlayer){
     const idx = state.entities.findIndex(e => e.type===EntityTypes.player);
     if (idx >= 0){
       const p = state.entities[idx];
-      let best = null, bestDelta = 0;
+      let best = null, bestDelta = 0, bestL = -1;
       for (let y=0;y<state.size.rows;y++) for (let x=0;x<state.size.cols;x++){
-        if (!reach[y][x]) continue;
         const t = state.base[y][x]||'floor';
         if (isTrait(t,'isWallForPlayer')||isTrait(t,'isHoleForPlayer')) continue;
+        if (t==='exit') continue; // avoid trivial move onto exit
         const anyHere = state.entities.some(e=> e!==p && e.x===x && e.y===y);
         if (anyHere) continue;
         const test = cloneState(state);
@@ -592,16 +587,15 @@ async function mutateEntitiesOptimally(state, opts, runSolver){
         pp.x = x; pp.y = y; pp.state = { mode:'free', entryDir:{dx:0,dy:0} };
         if (!isValidInitialPositions(test)) if (!attemptRelocateInvalid(test,1)) continue;
         const sObj = await scoreOf(test); if (!sObj.ok) continue;
-        const d = sObj.score - baseScore; if (d>bestDelta){ bestDelta=d; best={x,y}; }
+        const d = sObj.score - baseScore; if (d>bestDelta || (Math.abs(d-bestDelta)<=1e-9 && sObj.L>bestL)){ bestDelta=d; best={x,y}; bestL=sObj.L; }
       }
       if (best && bestDelta>0){ p.x=best.x; p.y=best.y; p.state={mode:'free',entryDir:{dx:0,dy:0}}; changed=true; const sObj2=await scoreOf(state); if (sObj2.ok) baseScore=sObj2.score; }
     }
   }
   // Place a box/heavyBox
   if (opts.placeBoxes){
-    let best = null, bestDelta = 0, bestType = EntityTypes.box;
+    let best = null, bestDelta = 0, bestType = EntityTypes.box, bestL = -1;
     for (let y=0;y<state.size.rows;y++) for (let x=0;x<state.size.cols;x++){
-      if (!reach[y][x]) continue;
       const t = state.base[y][x]||'floor';
       if (!allowsBoxTile(t)) continue;
       const anyBlock = state.entities.some(e=> (e.x===x && e.y===y));
@@ -611,7 +605,7 @@ async function mutateEntitiesOptimally(state, opts, runSolver){
         test.entities.push({ type, x, y });
         if (!isValidInitialPositions(test)) if (!attemptRelocateInvalid(test,1)) continue;
         const sObj = await scoreOf(test); if (!sObj.ok) continue;
-        const d = sObj.score - baseScore; if (d>bestDelta){ bestDelta=d; best={x,y}; bestType=type; }
+        const d = sObj.score - baseScore; if (d>bestDelta || (Math.abs(d-bestDelta)<=1e-9 && sObj.L>bestL)){ bestDelta=d; best={x,y}; bestType=type; bestL=sObj.L; }
       }
     }
     if (best && bestDelta>0){ state.entities.push({ type: bestType, x: best.x, y: best.y }); changed=true; }
@@ -815,7 +809,7 @@ function isValidInitialPositions(state){
   const isPlayer = (e)=> e.type===EntityTypes.player;
   const isBoxLike = (e)=> e.type===EntityTypes.box || e.type===EntityTypes.heavyBox;
   const isFragileEnt = (e)=> e.type===EntityTypes.fragileWall;
-  const supportsPlayer = (t)=> !isTrait(t,'isWallForPlayer') && !isTrait(t,'isHoleForPlayer');
+  const supportsPlayer = (t)=> !isTrait(t,'isWallForPlayer') && !isTrait(t,'isHoleForPlayer') && t!=='exit';
   const supportsBox = (t)=> !isTrait(t,'isWallForBox') && !isTrait(t,'isHoleForBox');
 
   // Occupancy per cell
@@ -1139,7 +1133,8 @@ function readScoringConfig(){
     L_min_solvable: Math.max(0, Math.floor(num('scG_LminSolv', 0)))
   };
 
-  return { weights, bands, params, globalConstraints };
+  const mapSigned = bool('scMapSigned', true);
+  return { weights, bands, params, globalConstraints, mapSigned };
 }
 
 function buildMoveIndex(edges){
