@@ -320,7 +320,10 @@
         <div class="card levels-card">
           <h2 class="card-title">Level Library</h2>
           <div class="levels-row">
-            <label for="server-levels">Levels
+            <label for="server-worlds">World
+              <select id="server-worlds"></select>
+            </label>
+            <label for="server-levels">Level
               <select id="server-levels"></select>
             </label>
             <button id="load-server">Load</button>
@@ -665,7 +668,7 @@
     import { draw, initCanvas, animate, setRedraw } from './ui/canvas.js';
     import { setupBuildUI } from './ui/build.js';
     import { setupHUD } from './ui/hud.js';
-    import { loadLevelList, loadLevel, exportLevel, importLevel } from './ui/io.js';
+    import { loadWorldList, loadLevelListForWorld, loadWorldLevel, loadLevelList, loadLevel, exportLevel, importLevel } from './ui/io.js';
     import { stepMove } from './core/engine.js';
     import { isWinningState, isLosingState } from './core/goals.js';
     import { setupAutoUI, simplifyLevel } from './ui/auto.js';
@@ -709,22 +712,40 @@
     let nextReadyAt = 0; // input cooldown for moves
     const MOVE_COOLDOWN_MS = 100;
 
-    async function refreshLevelDropdown() {
-      const list = await loadLevelList();
+    async function refreshWorldsDropdown() {
+      const worlds = await loadWorldList();
+      const wsel = document.getElementById('server-worlds');
+      const lsel = document.getElementById('server-levels');
+      if (!wsel || !lsel) return;
+      wsel.innerHTML = '';
+      lsel.innerHTML = '';
+      if (!worlds || worlds.length === 0 || (worlds.length === 1 && worlds[0] === '.')) {
+        // Fallback: hide worlds selector and show flat levels
+        const wrap = wsel.closest('label');
+        if (wrap) wrap.style.display = 'none';
+        const list = await loadLevelList();
+        if (!list || list.length === 0) {
+          const opt = document.createElement('option'); opt.value=''; opt.textContent='(no levels found)'; lsel.appendChild(opt);
+        } else {
+          list.forEach(name => { const opt = document.createElement('option'); opt.value=name; opt.textContent=name; lsel.appendChild(opt); });
+        }
+        return;
+      }
+      const wrap = wsel.closest('label'); if (wrap) wrap.style.display='';
+      worlds.forEach(w => { const opt = document.createElement('option'); opt.value=w; opt.textContent=w; wsel.appendChild(opt); });
+      // populate levels for the first world by default
+      const world = wsel.value || worlds[0];
+      await refreshLevelDropdown(world);
+    }
+
+    async function refreshLevelDropdown(world) {
+      const list = await loadLevelListForWorld(world);
       const sel = document.getElementById('server-levels');
       sel.innerHTML = '';
       if (!list || list.length === 0) {
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = '(no levels found or index.json missing)';
-        sel.appendChild(opt);
+        const opt = document.createElement('option'); opt.value=''; opt.textContent='(no levels found)'; sel.appendChild(opt);
       } else {
-        list.forEach(name => {
-          const opt = document.createElement('option');
-          opt.value = name;
-          opt.textContent = name;
-          sel.appendChild(opt);
-        });
+        list.forEach(name => { const opt = document.createElement('option'); opt.value=name; opt.textContent=name; sel.appendChild(opt); });
       }
     }
 
@@ -783,13 +804,15 @@
         btn.setAttribute('aria-pressed', isOpen ? 'true' : 'false');
         btn.textContent = isOpen ? 'Hide Solver' : 'Show Solver';
       },
-      onRefreshLevels: refreshLevelDropdown,
+      onRefreshLevels: refreshWorldsDropdown,
       onLoadLevel: async () => {
-        const sel = document.getElementById('server-levels');
-        const name = sel.value;
+        const wsel = document.getElementById('server-worlds');
+        const lsel = document.getElementById('server-levels');
+        const world = (wsel && wsel.value) || '.';
+        const name = lsel.value;
         if (!name) return alert('Select a level first');
         try {
-          const data = await loadLevel(name);
+          const data = await loadWorldLevel(world, name);
           state = data;
           ensurePlayerValidPosition(state);
           savedSnapshot = cloneState(state);
@@ -1212,7 +1235,11 @@ if (best) {
 
     // Initial render and data
     refresh();
-    refreshLevelDropdown();
+    refreshWorldsDropdown();
+
+    // When world changes, refresh levels list
+    const wsel = document.getElementById('server-worlds');
+    if (wsel) wsel.addEventListener('change', async () => { await refreshLevelDropdown(wsel.value || '.'); });
   </script>
 </body>
 </html>
