@@ -15,6 +15,7 @@ const colors = {
   player: '#4c3ce7',
   box: '#f39c12',
   heavyBox: '#b76b1e',
+  triBox: '#00a7a7',
   fragile: '#666666',
   grid: '#d7d7d7'
 };
@@ -233,13 +234,53 @@ export function draw(state) {
     if (entity.type === EntityTypes.player) continue;
     const color = entity.type === EntityTypes.box
       ? colors.box
-      : (entity.type === EntityTypes.heavyBox ? colors.heavyBox : colors.fragile);
+      : (entity.type === EntityTypes.heavyBox ? colors.heavyBox : (entity.type === EntityTypes.triBox ? colors.triBox : colors.fragile));
     const ex = entity.x * tileSize + 4;
     const ey = entity.y * tileSize + 4;
     const ew = tileSize - 8;
     const eh = tileSize - 8;
-    ctx.fillStyle = color;
-    ctx.fillRect(ex, ey, ew, eh);
+    if (entity.type === EntityTypes.triBox) {
+      // Draw right triangle with right angle located at the corner given by its short sides.
+      // orient denotes the short sides; e.g., 'SE' => short legs on South and East => right angle at bottom-right.
+      const orient = (entity.state && entity.state.orient) || 'NE';
+      const px = entity.x * tileSize;
+      const py = entity.y * tileSize;
+      const inset = Math.max(4, Math.floor(tileSize * 0.12));
+      const xL = px + inset, xR = px + tileSize - inset;
+      const yT = py + inset, yB = py + tileSize - inset;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      if (orient === 'NE') {
+        // short legs on North and East => right angle at top-right (TR)
+        ctx.moveTo(xR, yT); // TR
+        ctx.lineTo(xL, yT); // TL
+        ctx.lineTo(xR, yB); // BR
+      } else if (orient === 'NW') {
+        // short legs on North and West => right angle at top-left (TL)
+        ctx.moveTo(xL, yT); // TL
+        ctx.lineTo(xR, yT); // TR
+        ctx.lineTo(xL, yB); // BL
+      } else if (orient === 'SE') {
+        // short legs on South and East => right angle at bottom-right (BR)
+        ctx.moveTo(xR, yB); // BR
+        ctx.lineTo(xR, yT); // TR
+        ctx.lineTo(xL, yB); // BL
+      } else { // 'SW'
+        // short legs on South and West => right angle at bottom-left (BL)
+        ctx.moveTo(xL, yB); // BL
+        ctx.lineTo(xL, yT); // TL
+        ctx.lineTo(xR, yB); // BR
+      }
+      ctx.closePath();
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.lineWidth = Math.max(1, Math.floor(tileSize * 0.05));
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillRect(ex, ey, ew, eh);
+    }
 
     // Fragile wall entity: draw crack overlay to differentiate from normal walls
     if (entity.type === EntityTypes.fragileWall) {

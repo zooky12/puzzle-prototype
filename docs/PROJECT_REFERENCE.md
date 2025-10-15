@@ -36,7 +36,7 @@ Tiles (`core/tiles.js`)
   - `fragileWall` (`isWallForPlayer`, `isWallForBox`, `isFragile`)
 
 Entities (`core/entities.js`)
-- `EntityTypes`: `player`, `box`, `heavyBox`, `fragileWall`
+- `EntityTypes`: `player`, `box`, `heavyBox`, `triBox`, `fragileWall`
 - Registry fields:
   - `drawColor` (UI hint)
   - `solid` (blocks other entities)
@@ -213,6 +213,7 @@ ui/build.js
 - `setupBuildUI({ canvasEl, getState, setState, onModified, onSnapshot, requestRedraw, isBuildMode })`
   - Painting tiles and toggling entities on the canvas.
   - Fill unreachable with walls (flood from player), clear map, directional resizing (add/remove rows/cols), compact borders.
+  - Triangular Box tools: place/remove via “Triangular Box”, rotate via separate “Rotate Tri Box” button (cycles `NE → SE → SW → NW → NE`).
 
 ui/auto.js
 - `setupAutoUI({ getState, setState, runSolver, onPlaySolution })` — Auto Creator panel
@@ -223,6 +224,7 @@ ui/auto.js
 - Helpers and key functions:
   - Parameters and UI
     - `readParams()` — read Auto Creator controls
+      - Per-type box chips in the two dropdowns: `Place Box`, `Place Heavy Box`, `Place Tri Box` and `Remove Box`, `Remove Heavy Box`, `Remove Tri Box`.
     - `readScoringConfig()` — read scoring weights/bands/params/constraints/mapSigned
     - `buildMoveIndex(edges)` — fast lookup of next state by move char for a given parent hash
   - Candidate initialization
@@ -233,8 +235,8 @@ ui/auto.js
     - `mutateTilesOptimally(state, maxChanges, sourceAllowed?, targetAllowed?, runSolver, limits) → Promise<boolean>` — greedy one-change-at-a-time by score improvement
     - `simplifyTilesPreservingResult({ base, candidate, params, runSolver, prevResult })` — attempts to replace changed tiles with simpler equivalents preserving solver signature
   - Entity mutations
-    - `mutateEntities(state, { movePlayer?, placeBoxes?, removeBoxes? }) → boolean`
-    - `mutateEntitiesOptimally(state, opts, runSolver, limits) → Promise<boolean>` — greedy move/place to improve score
+    - `mutateEntities(state, { movePlayer?, placeBoxes?, removeBoxes?, placeTypes?, removeTypes? }) → boolean`
+    - `mutateEntitiesOptimally(state, opts, runSolver, limits) → Promise<boolean>` — respects per-type placement options
   - Validity and dedupe
     - `isValidInitialPositions(state) → boolean` — player not on exit/hole/wall, boxes on legal tiles, no overlapping conflicts
     - `attemptRelocateInvalid(state, maxAttempts=3) → boolean` — try to relocate invalid entities randomly to valid spots
@@ -270,3 +272,10 @@ Scoring highlights (Evaluator)
 ## Notes
 - All functions that return a new state clone immutably unless explicitly documented to mutate. Within handlers, the passed-in `state` is already a clone from the engine/state machine.
 - UI modules are browser-side and expect DOM elements with specific ids/classes as used in `index.html`.
+core/player/states/inboxTri.js
+- `canHandle(state, player, under) → boolean` — `mode==='inbox'` and `under.type==='triBox'`
+- `handleInput(state, player, { dx, dy })`
+  - Reverse-flight identical to other boxes (press opposite of entryDir).
+  - Orientation denotes short sides: `NE` (short on North & East), `NW`, `SE`, `SW`.
+  - Long-side directions (the hypotenuse-facing directions): `NE→{S,W}`, `NW→{E,S}`, `SE→{N,W}`, `SW→{N,E}`.
+  - Tri flight rule: only if the player entered from one of the long-side directions and presses any long-side direction; otherwise behave like a normal box (push chain / fall rules).

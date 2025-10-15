@@ -332,7 +332,7 @@ function simulatePathTags(initialState, moves){
     let movedBoxes = 0, movedHeavies = 0;
     let brokeFrag = false, fell = false;
     for (const ef of (effects||[])){
-      if (ef.type === 'entityMoved' && (ef.entityType===EntityTypes.box || ef.entityType===EntityTypes.heavyBox)){
+      if (ef.type === 'entityMoved' && (ef.entityType===EntityTypes.box || ef.entityType===EntityTypes.heavyBox || ef.entityType===EntityTypes.triBox)){
         movedBoxes++;
         if (ef.entityType===EntityTypes.heavyBox) movedHeavies++;
       } else if (ef.type === 'tileChanged') {

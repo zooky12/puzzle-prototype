@@ -16,7 +16,7 @@ export async function runSolver(initialState, {
   cancelRequested = false;
 
   const root = cloneState(initialState);
-  initZobrist(root.size.rows, root.size.cols, ['box', 'heavyBox', 'fragileWall']);
+  initZobrist(root.size.rows, root.size.cols, ['box', 'heavyBox', 'triBox', 'fragileWall']);
 
   const startHash = hashState(root);
   const visited = new Set([startHash]);

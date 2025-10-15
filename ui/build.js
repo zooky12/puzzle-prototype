@@ -3,11 +3,12 @@ import { cloneState, addRow, removeRow, addColumn, removeColumn, compactState, f
 import { EntityTypes } from '../core/entities.js';
 import { isTrait } from '../core/tiles.js';
 
-const pushableTypes = new Set([EntityTypes.box, EntityTypes.heavyBox]);
+const pushableTypes = new Set([EntityTypes.box, EntityTypes.heavyBox, EntityTypes.triBox]);
 
 export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnapshot, requestRedraw, isBuildMode }) {
   let currentPaintTile = 'wall';
   let currentEntityType = null;
+  let currentRotateType = null;
   let mouseDown = false;
 
   // Botons tiles
@@ -27,8 +28,24 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
   document.querySelectorAll('.build-controls button[data-entity]').forEach(b=>{
     b.addEventListener('click', ()=>{
       if (!isBuildMode()) return;
+      currentRotateType = null;
       currentEntityType = b.dataset.entity;
       document.querySelectorAll('.build-controls button[data-tile],.build-controls button[data-entity]')
+        .forEach(btn=> { btn.classList.remove('active'); btn.setAttribute('aria-pressed','false'); });
+      document.querySelectorAll('.build-controls button[data-rotate]')
+        .forEach(btn=> { btn.classList.remove('active'); btn.setAttribute('aria-pressed','false'); });
+      b.classList.add('active');
+      b.setAttribute('aria-pressed','true');
+    });
+  });
+
+  // Rotate buttons
+  document.querySelectorAll('.build-controls button[data-rotate]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      if (!isBuildMode()) return;
+      currentEntityType = null;
+      currentRotateType = b.dataset.rotate;
+      document.querySelectorAll('.build-controls button[data-tile],.build-controls button[data-entity],.build-controls button[data-rotate]')
         .forEach(btn=> { btn.classList.remove('active'); btn.setAttribute('aria-pressed','false'); });
       b.classList.add('active');
       b.setAttribute('aria-pressed','true');
@@ -73,10 +90,7 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
 
   function toggleEntity(s, x, y, type) {
     const idx = s.entities.findIndex(e => e.x===x && e.y===y && e.type===type);
-    if (idx>=0) {
-      s.entities.splice(idx,1);
-      return;
-    }
+    if (idx>=0) { s.entities.splice(idx,1); return; }
 
     if (type === EntityTypes.player) {
       s.entities = s.entities.filter(e=>e.type!==EntityTypes.player);
@@ -92,6 +106,8 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
       // Capture the current base tile so breaking restores it correctly
       const underTile = s.base[y][x] || 'floor';
       s.entities.push({ type, x, y, underTile });
+    } else if (type === EntityTypes.triBox) {
+      s.entities.push({ type, x, y, state: { orient: 'SE' } });
     } else {
       s.entities.push({ type, x, y });
     }
@@ -102,6 +118,22 @@ export function setupBuildUI({ canvasEl, getState, setState, onModified, onSnaps
     const s = cloneState(getState());
     const {x,y} = gridPos(e);
     if (!inB(s,x,y)) return;
+
+    if (currentRotateType) {
+      if (currentRotateType === EntityTypes.triBox) {
+        const existing = s.entities.find(e => e.x===x && e.y===y && e.type===EntityTypes.triBox);
+        if (existing) {
+          const order = ['NE','SE','SW','NW'];
+          const cur = (existing.state && existing.state.orient) || 'SE';
+          const idx = order.indexOf(cur);
+          const next = order[(idx+1) % order.length];
+          existing.state = { ...(existing.state||{}), orient: next };
+          onSnapshot();
+          setState(s); onModified(); requestRedraw();
+        }
+      }
+      return;
+    }
 
     if (currentEntityType) {
       onSnapshot();

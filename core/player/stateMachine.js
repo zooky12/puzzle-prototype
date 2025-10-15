@@ -5,6 +5,7 @@ import { EntityTypes, isPushable } from '../entities.js';
 import * as Free from './states/free.js';
 import * as InboxBox from './states/inboxBox.js';
 import * as InboxHeavy from './states/inboxHeavy.js';
+import * as InboxTri from './states/inboxTri.js';
 
 export function stepPlayerMove(state, { dx, dy }) {
   const s = cloneState(state);
@@ -16,7 +17,7 @@ export function stepPlayerMove(state, { dx, dy }) {
   const under = firstEntityAt(s, px, py, isPushable);
 
   // Choose handler by state and occupant under player
-  const candidates = [InboxHeavy, InboxBox, Free];
+  const candidates = [InboxHeavy, InboxTri, InboxBox, Free];
   for (const handler of candidates) {
     if (handler.canHandle(s, player, under)) {
       return handler.handleInput(s, player, { dx, dy });
@@ -26,4 +27,3 @@ export function stepPlayerMove(state, { dx, dy }) {
   // Fallback to free if no handler claims it
   return Free.handleInput(s, player, { dx, dy });
 }
-

@@ -25,6 +25,12 @@ export function initZobrist(rows, cols, entityTypes = []) {
       z: Array.from({length:rows}, ()=> Array.from({length:cols}, ()=> rndBig())) // neutral (0,0)
     }
   };
+  table.triOrient = {
+    NE: Array.from({length:rows}, ()=> Array.from({length:cols}, ()=> rndBig())),
+    NW: Array.from({length:rows}, ()=> Array.from({length:cols}, ()=> rndBig())),
+    SE: Array.from({length:rows}, ()=> Array.from({length:cols}, ()=> rndBig())),
+    SW: Array.from({length:rows}, ()=> Array.from({length:cols}, ()=> rndBig()))
+  };
 }
 
 function dirKey(d) {
@@ -38,7 +44,7 @@ function dirKey(d) {
 
 export function hashState(state) {
   if (!table || table.rows!==state.size.rows || table.cols!==state.size.cols) {
-    initZobrist(state.size.rows, state.size.cols, ['box','heavyBox','fragileWall']);
+    initZobrist(state.size.rows, state.size.cols, ['box','heavyBox','triBox','fragileWall']);
   }
   let h = 0n ^ table.salt;
 
@@ -57,6 +63,10 @@ export function hashState(state) {
         const key = dirKey(e.state.entryDir);
         h ^= table.playerModes.inbox[key][e.y][e.x];
       }
+    } else if (e.type==='triBox') {
+      const ori = (e.state && e.state.orient) || 'SE';
+      const salt = table.triOrient[ori] || table.triOrient.SE;
+      h ^= salt[e.y][e.x];
     }
   }
   return h.toString();

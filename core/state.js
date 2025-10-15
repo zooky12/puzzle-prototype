@@ -179,7 +179,7 @@ export function firstEntityAt(state, x, y, predicate) {
   return state.entities.find(e => e.x===x && e.y===y && (!predicate || predicate(e))) || null;
 }
 export function anyBoxAt(state, x, y) {
-  const e = state.entities.find(e => e.x===x && e.y===y && (e.type===EntityTypes.box||e.type===EntityTypes.heavyBox));
+  const e = state.entities.find(e => e.x===x && e.y===y && (e.type===EntityTypes.box||e.type===EntityTypes.heavyBox||e.type===EntityTypes.triBox));
   return e ? { type:e.type } : null;
 }
 export function removeEntityAt(state, x, y, predicate) {
@@ -209,6 +209,7 @@ export function deserializeState(json) {
     data.entities = [];
     (dyn.boxes || data.boxes || []).forEach(b => data.entities.push({ type:EntityTypes.box, x:b.x, y:b.y }));
     (dyn.heavyBoxes || data.heavyBoxes || []).forEach(h => data.entities.push({ type:EntityTypes.heavyBox, x:h.x, y:h.y }));
+    (dyn.triBoxes || data.triBoxes || []).forEach(t => data.entities.push({ type:EntityTypes.triBox, x:t.x, y:t.y, state: t.state && t.state.orient ? { orient: t.state.orient } : { orient: 'NE' } }));
     (dyn.fragiles || data.fragiles || []).forEach(f => data.entities.push({ type:EntityTypes.fragileWall, x:f.x, y:f.y }));
     const p = dyn.player || data.player;
     if (p) data.entities.push({ type:EntityTypes.player, x:p.x, y:p.y, state: p });

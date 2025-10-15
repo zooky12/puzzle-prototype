@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ca">
 <head>
   <meta charset="utf-8"/>
@@ -58,6 +58,7 @@
       border:1px solid rgba(255, 255, 255, 0.18);
       background: rgba(0, 6, 20, 0.48);
       image-rendering: pixelated;
+      touch-action: none; /* enable custom swipe gestures */
     }
     #bigMessage {
       font-size:24px;
@@ -96,7 +97,7 @@
     .info-panel { width:100%; background: rgba(12, 18, 40, 0.7); border:1px solid rgba(255, 255, 255, 0.1); border-radius:14px; padding:12px 16px; color: var(--text-primary); box-shadow: 0 14px 34px rgba(5, 14, 42, 0.28); backdrop-filter: blur(12px); }
     .info-panel summary { cursor:pointer; list-style:none; font-weight:600; display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:15px; letter-spacing:0.01em; }
     .info-panel summary::marker { display:none; }
-    .info-panel summary::after { content:'▾'; font-size:16px; transition: transform 160ms ease; color: var(--text-muted); }
+    .info-panel summary::after { content:'?'; font-size:16px; transition: transform 160ms ease; color: var(--text-muted); }
     .info-panel[open] summary::after { transform: rotate(-180deg); }
     .info-panel[open] summary { color:#7faaff; }
     .info-panel summary span { font-size:13px; color: var(--text-muted); font-weight:500; }
@@ -241,7 +242,7 @@
       cursor:pointer;
     }
     .tile-toggle::after {
-      content:'▾';
+      content:'?';
       font-size:14px;
       transition: transform 160ms ease;
       color: var(--text-muted);
@@ -431,6 +432,8 @@
                     <button type="button" class="tile-chip" data-entity="box" aria-pressed="false">Box</button>
                     <button type="button" class="tile-chip" data-entity="heavyBox" aria-pressed="false">Heavy Box</button>
                     <button type="button" class="tile-chip" data-entity="fragileWall" aria-pressed="false">Fragile Wall</button>
+                    <button type="button" class="tile-chip" data-entity="triBox" aria-pressed="false">Triangular Box</button>
+                    <button type="button" class="tile-chip" data-rotate="triBox" aria-pressed="false" title="Rotate Tri Box">Rotate Tri Box</button>
                     <button type="button" class="tile-chip" data-entity="player" aria-pressed="false">Player</button>
                   </div>
                 </div>
@@ -440,6 +443,7 @@
               <button id="clear-btn">Clear</button>
               <button id="fill-floor">Fill Walls (non-reachable)</button>
               <button id="place-one">Place 1</button>
+              <button id="remove-one">Remove 1</button>
               <button id="simplify-keep" title="Simplify level (preserve dead ends)">Simplify (strict)</button>
               <button id="simplify-flex" title="Simplify level (dead ends may change)">Simplify (flex)</button>
             </div>
@@ -554,7 +558,9 @@
                 <button type="button" class="tile-chip active" data-value="slimPathFloor" aria-pressed="true">slimPathFloor</button>
                 <button type="button" class="tile-chip active" data-value="slimPathHole" aria-pressed="true">slimPathHole</button>
                 <button type="button" class="tile-chip active" data-value="fragileWall" aria-pressed="true">fragileWall</button>
-                <button type="button" class="tile-chip active" data-option="removeBoxes" aria-pressed="true">Remove Boxes</button>
+                <button type="button" class="tile-chip active" data-option="removeBox" aria-pressed="true">Remove Box</button>
+                <button type="button" class="tile-chip active" data-option="removeHeavyBox" aria-pressed="true">Remove Heavy Box</button>
+                <button type="button" class="tile-chip active" data-option="removeTriBox" aria-pressed="true">Remove Tri Box</button>
               </div>
             </div>
             <button type="button" class="tile-toggle" data-target="autoTilesPlace" aria-expanded="false">Tiles allowed to place</button>
@@ -575,7 +581,9 @@
                 <button type="button" class="tile-chip active" data-value="slimPathFloor" aria-pressed="true">slimPathFloor</button>
                 <button type="button" class="tile-chip active" data-value="slimPathHole" aria-pressed="true">slimPathHole</button>
                 <button type="button" class="tile-chip active" data-value="fragileWall" aria-pressed="true">fragileWall</button>
-                <button type="button" class="tile-chip active" data-option="placeBoxes" aria-pressed="true">Place Boxes</button>
+                <button type="button" class="tile-chip active" data-option="placeBox" aria-pressed="true">Place Box</button>
+                <button type="button" class="tile-chip active" data-option="placeHeavyBox" aria-pressed="true">Place Heavy Box</button>
+                <button type="button" class="tile-chip active" data-option="placeTriBox" aria-pressed="true">Place Tri Box</button>
               </div>
             </div>
             <div class="solver-actions">
@@ -588,12 +596,12 @@
               <div class="info-section">
                 <h4>Weights</h4>
                 <div class="solver-grid">
-                  <label title="Fewer solutions → higher score (log-capped)">U (Uniqueness) <input id="scW_U" type="number" step="0.1" value="1.0" /></label>
+                  <label title="Fewer solutions ? higher score (log-capped)">U (Uniqueness) <input id="scW_U" type="number" step="0.1" value="1.0" /></label>
                   <label title="Fraction of reachable states that are dead ends">D (Dead-End Density) <input id="scW_D" type="number" step="0.1" value="0.5" /></label>
                   <label title="Weights early dead ends more; t clamped to [0,L]">Fr (Early Frustration) <input id="scW_Fr" type="number" step="0.1" value="0.8" /></label>
                   <label title="Shortest path mapped to [L_min,L_max] window">S (Solution Depth) <input id="scW_S" type="number" step="0.1" value="1.2" /></label>
                   <label title="Entropy of per-step mechanics along a shortest path">M (Mechanic Diversity) <input id="scW_M" type="number" step="0.1" value="0.6" /></label>
-                  <label title="Correlation with ideal build–climax–resolution arc">F (Flow Arc) <input id="scW_F" type="number" step="0.1" value="1.0" /></label>
+                  <label title="Correlation with ideal build?climax?resolution arc">F (Flow Arc) <input id="scW_F" type="number" step="0.1" value="1.0" /></label>
                   <label title="Symmetry of the base grid (layout only)">Y (Symmetry) <input id="scW_Y" type="number" step="0.1" value="0.0" /></label>
                 </div>
               </div>
@@ -612,12 +620,12 @@
               <div class="info-section">
                 <h4>Params</h4>
                 <div class="solver-grid">
-                  <label title="Cap for solutions in U"><span>U · S_max</span> <input id="scP_U_Smax" type="number" min="1" step="1" value="16" /></label>
-                  <label title="Desired shortest-length lower bound"><span>S · L_min</span> <input id="scP_S_Lmin" type="number" min="1" step="1" value="8" /></label>
-                  <label title="Desired shortest-length upper bound"><span>S · L_max</span> <input id="scP_S_Lmax" type="number" min="2" step="1" value="30" /></label>
-                  <label title="Dead-end proximity horizon (fixed at 1)"><span>F · horizon h</span> <input id="scP_F_h" type="number" min="1" max="1" step="1" value="1" /></label>
-                  <label title="Ideal difficulty curve kind"><span>F · ideal</span> <select id="scP_F_kind"><option value="sine" selected>sine</option></select></label>
-                  <label title="Symmetry mode for layout grid"><span>Y · mode</span> <select id="scP_Y_sym"><option value="horizontal" selected>horizontal</option><option value="vertical">vertical</option><option value="rot180">rot180</option></select></label>
+                  <label title="Cap for solutions in U"><span>U ? S_max</span> <input id="scP_U_Smax" type="number" min="1" step="1" value="16" /></label>
+                  <label title="Desired shortest-length lower bound"><span>S ? L_min</span> <input id="scP_S_Lmin" type="number" min="1" step="1" value="8" /></label>
+                  <label title="Desired shortest-length upper bound"><span>S ? L_max</span> <input id="scP_S_Lmax" type="number" min="2" step="1" value="30" /></label>
+                  <label title="Dead-end proximity horizon (fixed at 1)"><span>F ? horizon h</span> <input id="scP_F_h" type="number" min="1" max="1" step="1" value="1" /></label>
+                  <label title="Ideal difficulty curve kind"><span>F ? ideal</span> <select id="scP_F_kind"><option value="sine" selected>sine</option></select></label>
+                  <label title="Symmetry mode for layout grid"><span>Y ? mode</span> <select id="scP_Y_sym"><option value="horizontal" selected>horizontal</option><option value="vertical">vertical</option><option value="rot180">rot180</option></select></label>
                 </div>
               </div>
               <div class="info-section">
@@ -682,10 +690,10 @@
       el.classList.remove('win', 'lose', 'active');
 
       if (type === 'win') {
-        el.textContent = message || '✨ Victory! You solved the room.';
+        el.textContent = message || '? Victory! You solved the room.';
         el.classList.add('win', 'active');
       } else if (type === 'lose') {
-        el.textContent = message || '💥 Oops! Something went wrong. Try again!';
+        el.textContent = message || '?? Oops! Something went wrong. Try again!';
         el.classList.add('lose', 'active');
       } else {
         el.textContent = '';
@@ -933,12 +941,12 @@
         // Only works in Build mode
         if (!buildMode) return alert('Enter Build Tools first (Show Build Tools).');
 
-        // Determine selected tile from Build Tiles chips
+                // Determine selection (tile or entity)
+        const activeEntityBtn = document.querySelector('#buildEntities .tile-chip.active[data-entity], .build-controls .tile-chip.active[data-entity]');
         const activeTileBtn = document.querySelector('#buildTiles .tile-chip.active[data-tile], .build-controls .tile-chip.active[data-tile]');
-        const tileType = activeTileBtn?.dataset?.tile;
-        if (!tileType) return alert('Select a tile in Build Tools (Tiles dropdown) first.');
-
-        const rows = state.size.rows;
+        const entityType = activeEntityBtn?.dataset?.entity || null;
+        const tileType = activeTileBtn?.dataset?.tile || null;
+        if (!entityType && !tileType) return alert('Select a tile or a box entity (Box/Heavy/Triangular) first.');const rows = state.size.rows;
         const cols = state.size.cols;
         // Solver limits from Solver Tools inputs
         const limits = {
@@ -950,15 +958,11 @@
         placeOneBtn.disabled = true;
         const prevText = status ? status.textContent : '';
 
-        function canPlaceAt(x, y) {
-          // Skip if identical
+                function canPlaceTileAt(x, y) {
           const cur = state.base[y][x] || 'floor';
           if (cur === tileType) return false;
-          // Do not place under any entity
           const anyEnt = state.entities?.some(e => e.x === x && e.y === y);
           if (anyEnt) return false;
-          // If a box/heavyBox is here (should be caught above), or may be placed later, be conservative:
-          // If placing a tile that blocks boxes, avoid if a box is here
           const blocksBox = isTrait(tileType, 'isWallForBox') || isTrait(tileType, 'isHoleForBox');
           if (blocksBox) {
             const hasBox = state.entities?.some(e => (e.type === 'box' || e.type === 'heavyBox') && e.x === x && e.y === y);
@@ -966,39 +970,81 @@
           }
           return true;
         }
-
-        let best = null; // {x,y, solutions, fastest, deadEnds}
+        function allowsBoxTile(t) { return !isTrait(t, 'isWallForBox') && !isTrait(t, 'isHoleForBox'); }
+        function canPlaceEntityAt(x, y) {
+          if (!(entityType === 'box' || entityType === 'heavyBox' || entityType === 'triBox')) return false;
+          const anyEnt = state.entities?.some(e => e.x === x && e.y === y);
+          if (anyEnt) return false;
+          const t = state.base[y][x] || 'floor';
+          if (!allowsBoxTile(t)) return false;
+          return true;
+        }
+        let best = null; // {x,y, solutions, fastest, deadEnds, entity?, orient?}
         let checked = 0;
         for (let y = 0; y < rows; y++) {
           for (let x = 0; x < cols; x++) {
-            if (!canPlaceAt(x, y)) continue;
-            const test = cloneState(state);
-            test.base[y][x] = tileType;
-            const res = await runSolver(test, { ...limits, onProgress: () => {} });
-            const sols = Array.isArray(res?.solutions) ? res.solutions : [];
-            if (!sols.length) { checked++; continue; }
-            const deads = Array.isArray(res?.deadEnds) ? res.deadEnds : [];
-            const fastest = Math.min(...sols.map(s => s.length));
-
-            // Hardness: maximize fastest steps; then maximize dead ends; then minimize solutions
-            if (!best ||
-                fastest > best.fastest ||
-                (fastest === best.fastest && deads.length > best.deadEnds) ||
-                (fastest === best.fastest && deads.length === best.deadEnds && sols.length < best.solutions)) {
-              best = { x, y, solutions: sols.length, fastest, deadEnds: deads.length };
+            if (tileType) {
+              if (!canPlaceTileAt(x, y)) continue;
+              const test = cloneState(state);
+              test.base[y][x] = tileType;
+              const res = await runSolver(test, { ...limits, onProgress: () => {} });
+              const sols = Array.isArray(res?.solutions) ? res.solutions : [];
+              if (!sols.length) { checked++; continue; }
+              const deads = Array.isArray(res?.deadEnds) ? res.deadEnds : [];
+              const fastest = Math.min(...sols.map(s => s.length));
+              if (!best || fastest > best.fastest || (fastest === best.fastest && deads.length > best.deadEnds) || (fastest === best.fastest && deads.length === best.deadEnds && sols.length < best.solutions)) {
+                best = { x, y, solutions: sols.length, fastest, deadEnds: deads.length };
+              }
+              checked++;
+              if (status && checked % 10 === 0) status.textContent = `Evaluated ${checked}/${rows*cols} cells...`;
+              await new Promise(r => setTimeout(r, 0));
+            } else if (entityType) {
+              if (!canPlaceEntityAt(x, y)) continue;
+              if (entityType === 'triBox') {
+                const orients = ['NE','SE','SW','NW'];
+                for (const o of orients) {
+                  const test = cloneState(state);
+                  test.entities.push({ type: 'triBox', x, y, state: { orient: o } });
+                  const res = await runSolver(test, { ...limits, onProgress: () => {} });
+                  const sols = Array.isArray(res?.solutions) ? res.solutions : [];
+                  if (!sols.length) continue;
+                  const deads = Array.isArray(res?.deadEnds) ? res.deadEnds : [];
+                  const fastest = Math.min(...sols.map(s => s.length));
+                  if (!best || fastest > best.fastest || (fastest === best.fastest && deads.length > best.deadEnds) || (fastest === best.fastest && deads.length === best.deadEnds && sols.length < best.solutions)) {
+                    best = { x, y, solutions: sols.length, fastest, deadEnds: deads.length, entity: 'triBox', orient: o };
+                  }
+                  checked++;
+                }
+                if (status && checked % 10 === 0) status.textContent = `Evaluated ${checked} candidates...`;
+              } else {
+                const test = cloneState(state);
+                test.entities.push({ type: entityType, x, y });
+                const res = await runSolver(test, { ...limits, onProgress: () => {} });
+                const sols = Array.isArray(res?.solutions) ? res.solutions : [];
+                if (!sols.length) { checked++; continue; }
+                const deads = Array.isArray(res?.deadEnds) ? res.deadEnds : [];
+                const fastest = Math.min(...sols.map(s => s.length));
+                if (!best || fastest > best.fastest || (fastest === best.fastest && deads.length > best.deadEnds) || (fastest === best.fastest && deads.length === best.deadEnds && sols.length < best.solutions)) {
+                  best = { x, y, solutions: sols.length, fastest, deadEnds: deads.length, entity: entityType };
+                }
+                checked++;
+                if (status && checked % 10 === 0) status.textContent = `Evaluated ${checked}/${rows*cols} cells...`;
+                await new Promise(r => setTimeout(r, 0));
+              }
             }
-            checked++;
-            if (status && checked % 10 === 0) status.textContent = `Evaluated ${checked}/${rows*cols} cells...`;
-            await new Promise(r => setTimeout(r, 0));
           }
         }
-
-        if (best) {
+if (best) {
           undoStack.push(cloneState(state));
-          state.base[best.y][best.x] = tileType;
+          if (best.entity) {
+            if (best.entity === 'triBox') state.entities.push({ type: 'triBox', x: best.x, y: best.y, state: { orient: best.orient || 'SE' } });
+            else state.entities.push({ type: best.entity, x: best.x, y: best.y });
+          } else {
+            state.base[best.y][best.x] = tileType;
+          }
           setGameState(null);
           refresh();
-          if (status) status.textContent = `Placed at (${best.x},${best.y}) · steps:${best.fastest} sols:${best.solutions} deads:${best.deadEnds}`;
+          if (status) status.textContent = `Placed at (${best.x},${best.y})  � steps:${best.fastest} sols:${best.solutions} deads:${best.deadEnds}`;
         } else {
           if (status) status.textContent = 'No valid placement found (or none improved solvability).';
         }
@@ -1009,7 +1055,103 @@
       });
     }
 
-    // Gameplay controls
+    
+    // Remove 1: try removing a single entity (box/heavy/tri) that makes the level harder
+    const removeOneBtn = document.getElementById('remove-one');
+    if (removeOneBtn) {
+      removeOneBtn.addEventListener('click', async () => {
+        if (!buildMode) return alert('Enter Build Tools first (Show Build Tools).');
+        const limits = {
+          maxDepth: Number(document.getElementById('solverMaxDepth')?.value) || 100,
+          maxNodes: Number(document.getElementById('solverMaxNodes')?.value) || 200000,
+          maxSolutions: Number(document.getElementById('solverMaxSolutions')?.value) || 50
+        };
+        const status = document.getElementById('autoProgress') || document.getElementById('solverProgress');
+        const prevText = status ? status.textContent : '';
+        removeOneBtn.disabled = true;
+
+        function hardness(res){
+          const sols = Array.isArray(res?.solutions) ? res.solutions : [];
+          if (!sols.length) return null;
+          const fastest = Math.min(...sols.map(s => s.length));
+          const deadEnds = Array.isArray(res?.deadEnds) ? res.deadEnds.length : 0;
+          return { fastest, solutions: sols.length, deadEnds };
+        }
+        function better(a, b){
+          if (!a) return false; if (!b) return true;
+          if (a.fastest !== b.fastest) return a.fastest > b.fastest;
+          if (a.deadEnds !== b.deadEnds) return a.deadEnds > b.deadEnds;
+          return a.solutions < b.solutions;
+        }
+
+        const baseRes = await runSolver(state, { ...limits, onProgress: () => {} });
+        const baseH = hardness(baseRes);
+        if (!baseH) { removeOneBtn.disabled = false; if (status) status.textContent = 'Level unsolvable; cannot evaluate removal.'; return; }
+
+        let best = null; // { idx, h }
+        for (let i=0;i<(state.entities?.length||0);i++){
+          const e = state.entities[i]; if (!e) continue;
+          if (!(e.type==='box' || e.type==='heavyBox' || e.type==='triBox')) continue;
+          const test = cloneState(state);
+          test.entities.splice(i,1);
+          const res = await runSolver(test, { ...limits, onProgress: () => {} });
+          const h = hardness(res);
+          if (!h) continue;
+          const improves = (h.fastest > baseH.fastest) || (h.fastest===baseH.fastest && (h.deadEnds>baseH.deadEnds || (h.deadEnds===baseH.deadEnds && h.solutions<baseH.solutions)));
+          if (improves && better(h, best?.h)) best = { idx:i, h };
+        }
+
+        if (best) {
+          undoStack.push(cloneState(state));
+          state.entities.splice(best.idx,1);
+          setGameState(null);
+          refresh();
+          if (status) status.textContent = `Removed 1 entity - steps:${best.h.fastest} sols:${best.h.solutions} deads:${best.h.deadEnds}`;
+        } else {
+          if (status) status.textContent = 'No single removal increased difficulty.';
+        }
+        removeOneBtn.disabled = false;
+      });
+    }
+// Gameplay controls
+    // Touch swipe controls on canvas (mobile): only when not in build mode
+    (function(){
+      const canvas = document.getElementById('game');
+      if (!canvas) return;
+      let touchStart = null;
+      const minDist = 20; // px threshold
+      function onStart(ev){
+        if (buildMode) return; // ignore in build mode
+        const t = ev.touches ? ev.touches[0] : ev;
+        touchStart = { x: t.clientX, y: t.clientY, time: Date.now() };
+        if (ev.cancelable) ev.preventDefault();
+      }
+      function onEnd(ev){
+        if (buildMode) return;
+        if (!touchStart) return;
+        const t = ev.changedTouches ? ev.changedTouches[0] : ev;
+        const dxp = (t.clientX - touchStart.x) || 0;
+        const dyp = (t.clientY - touchStart.y) || 0;
+        touchStart = null;
+        // pick dominant axis
+        let dx=0, dy=0;
+        if (Math.abs(dxp) < minDist && Math.abs(dyp) < minDist) return;
+        if (Math.abs(dxp) > Math.abs(dyp)) dx = dxp > 0 ? 1 : -1;
+        else dy = dyp > 0 ? 1 : -1;
+        if (gameState) return;
+        const res = stepMove(state, { dx, dy });
+        if (!res.changed) return;
+        undoStack.push(cloneState(state));
+        state = res.newState; animate(res.effects); refresh();
+        if (isLosingState(state)) setGameState('lose', 'Game Over - fell into hole or box fell');
+        else if (isWinningState(state)) setGameState('win', 'You Win!');
+        else setGameState(null);
+        if (ev.cancelable) ev.preventDefault();
+      }
+      canvas.addEventListener('touchstart', onStart, { passive:false });
+      canvas.addEventListener('touchend', onEnd, { passive:false });
+      canvas.addEventListener('touchcancel', ()=>{ touchStart=null; }, { passive:true });
+    })();
     window.addEventListener('keydown', (e) => {
       const key = e.key.toLowerCase();
       const ae = document.activeElement;
@@ -1054,6 +1196,19 @@
   </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -4,7 +4,8 @@ export const EntityTypes = {
   player: 'player',
   box: 'box',
   heavyBox: 'heavyBox',
-  fragileWall: 'fragileWall'
+  fragileWall: 'fragileWall',
+  triBox: 'triBox'
 };
 
 export const EntityRegistry = {
@@ -22,6 +23,12 @@ export const EntityRegistry = {
     solid: true,
     pushable: true,
     heavy: true // activa la lògica especial al motor
+  },
+  [EntityTypes.triBox]: {
+    drawColor: '#00a7a7',
+    solid: true,
+    pushable: true,
+    triangular: true // triangle-shaped mechanics (orientation in entity.state.orient)
   },
   [EntityTypes.fragileWall]: {
     drawColor: '#777777',

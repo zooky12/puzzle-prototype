@@ -1,4 +1,4 @@
-﻿// ui/auto.js
+// ui/auto.js
 import { cloneState, removeRow, removeColumn, findPlayer } from '../core/state.js';
 import { EntityTypes, isSolid } from '../core/entities.js';
 import { isTrait, getTileTraits } from '../core/tiles.js';
@@ -234,7 +234,7 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
         const tileChanges = useGA && params.genPopMaxChanges ? params.genPopMaxChanges : params.maxTilesChanged;
         okTiles = await mutateTilesOptimally(candidate, tileChanges, params.tilesChange, params.tilesPlace, runSolver, getSolverLimits());
         if (params.movePlayer) okEnts = await mutateEntitiesOptimally(candidate, { movePlayer: true }, runSolver, getSolverLimits());
-        if (params.placeBoxes) okEnts = (await mutateEntitiesOptimally(candidate, { placeBoxes: true }, runSolver, getSolverLimits())) || okEnts;
+        if (params.placeBoxes) okEnts = (await mutateEntitiesOptimally(candidate, { placeBoxes: true, placeTypes: params.placeBoxTypes }, runSolver, getSolverLimits())) || okEnts;
       } else {
         const tileChanges = useGA && params.genPopMaxChanges ? params.genPopMaxChanges : params.maxTilesChanged;
         okTiles = mutateTiles(candidate, tileChanges, params.tilesChange, params.tilesPlace);
@@ -242,6 +242,8 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
           movePlayer: !!params.movePlayer,
           placeBoxes: !!params.placeBoxes,
           removeBoxes: !!params.removeBoxes,
+          placeTypes: params.placeBoxTypes,
+          removeTypes: params.removeBoxTypes,
         });
       }
       if (!(okTiles || okEnts)) continue; // neither tiles nor entities changed -> does not count as attempt
@@ -320,10 +322,10 @@ export function setupAutoUI({ getState, setState, runSolver, onPlaySolution }) {
     }
 
     const doneMsg = cancel
-      ? `Canceled Â· candidates:${best.length} Â· skipped:${invalidSkipped}`
+      ? `Canceled · candidates:${best.length} · skipped:${invalidSkipped}`
       : (duplicateStreak >= maxDuplicateStreak
-          ? `Done. candidates: ${best.length} Â· skipped:${invalidSkipped} (unique space exhausted)`
-          : `Done. candidates: ${best.length} Â· skipped:${invalidSkipped}`);
+          ? `Done. candidates: ${best.length} · skipped:${invalidSkipped} (unique space exhausted)`
+          : `Done. candidates: ${best.length} · skipped:${invalidSkipped}`);
     progressEl.textContent = doneMsg;
     runBtn.disabled = false;
     stopBtn.disabled = true;
@@ -375,8 +377,26 @@ function readParams() {
     maxNodes: getNum('solverMaxNodes', 200000, 100),
     maxSolutions: getNum('solverMaxSolutions', 50, 1)
     , movePlayer: getToggle('autoMovePlayer')
-    , placeBoxes: isOptionSelected('autoTilesPlace', 'placeBoxes')
-    , removeBoxes: isOptionSelected('autoTilesChange', 'removeBoxes')
+    , placeBoxes: (
+        isOptionSelected('autoTilesPlace', 'placeBox') ||
+        isOptionSelected('autoTilesPlace', 'placeHeavyBox') ||
+        isOptionSelected('autoTilesPlace', 'placeTriBox')
+      )
+    , removeBoxes: (
+        isOptionSelected('autoTilesChange', 'removeBox') ||
+        isOptionSelected('autoTilesChange', 'removeHeavyBox') ||
+        isOptionSelected('autoTilesChange', 'removeTriBox')
+      )
+    , placeBoxTypes: {
+        box: isOptionSelected('autoTilesPlace', 'placeBox'),
+        heavyBox: isOptionSelected('autoTilesPlace', 'placeHeavyBox'),
+        triBox: isOptionSelected('autoTilesPlace', 'placeTriBox')
+      }
+    , removeBoxTypes: {
+        box: isOptionSelected('autoTilesChange', 'removeBox'),
+        heavyBox: isOptionSelected('autoTilesChange', 'removeHeavyBox'),
+        triBox: isOptionSelected('autoTilesChange', 'removeTriBox')
+      }
     , placeOptimally: getToggle('autoPlaceOptimally')
     , genUseRatio: (()=>{ const el=document.getElementById('genUseRatio'); const v=Number(el?.value); return Number.isFinite(v)? Math.max(0,Math.min(1,v)) : 0; })()
     , genSkew: (()=>{ const el=document.getElementById('genSkew'); const v=Number(el?.value); return Number.isFinite(v)? Math.max(0,Math.min(1,v)) : 0.5; })()
@@ -605,7 +625,7 @@ async function mutateEntitiesOptimally(state, opts, runSolver, limits){
       if (best && bestDelta>0){ p.x=best.x; p.y=best.y; p.state={mode:'free',entryDir:{dx:0,dy:0}}; changed=true; const sObj2=await scoreOf(state); if (sObj2.ok) baseScore=sObj2.score; }
     }
   }
-  // Place a box/heavyBox
+  // Place a box/heavyBox/triBox
   if (opts.placeBoxes){
     let best = null, bestDelta = 0, bestType = EntityTypes.box, bestL = -1;
     for (let y=0;y<state.size.rows;y++) for (let x=0;x<state.size.cols;x++){
@@ -613,15 +633,40 @@ async function mutateEntitiesOptimally(state, opts, runSolver, limits){
       if (!allowsBoxTile(t)) continue;
       const anyBlock = state.entities.some(e=> (e.x===x && e.y===y));
       if (anyBlock) continue;
-      for (const type of [EntityTypes.box, EntityTypes.heavyBox]){
-        const test = cloneState(state);
-        test.entities.push({ type, x, y });
-        if (!isValidInitialPositions(test)) if (!attemptRelocateInvalid(test,1)) continue;
-        const sObj = await scoreOf(test); if (!sObj.ok) continue;
-        const d = sObj.score - baseScore; if (d>bestDelta || (Math.abs(d-bestDelta)<=1e-9 && sObj.L>bestL)){ bestDelta=d; best={x,y}; bestType=type; bestL=sObj.L; }
+      {
+      const allow = opts.placeTypes || { box:true, heavyBox:true, triBox:true };
+      const types = [];
+      if (allow.box) types.push(EntityTypes.box);
+      if (allow.heavyBox) types.push(EntityTypes.heavyBox);
+      if (allow.triBox) types.push(EntityTypes.triBox);
+      for (const type of types){
+        if (type === EntityTypes.triBox) {
+          const orients = ['NE','SE','SW','NW'];
+          for (const o of orients) {
+            const test = cloneState(state);
+            test.entities.push({ type, x, y, state: { orient: o } });
+            if (!isValidInitialPositions(test)) if (!attemptRelocateInvalid(test,1)) continue;
+            const sObj = await scoreOf(test); if (!sObj.ok) continue;
+            const d = sObj.score - baseScore; if (d>bestDelta || (Math.abs(d-bestDelta)<=1e-9 && sObj.L>bestL)){ bestDelta=d; best={x,y}; bestType={ t:type, o }; bestL=sObj.L; }
+          }
+        } else {
+          const test = cloneState(state);
+          test.entities.push({ type, x, y });
+          if (!isValidInitialPositions(test)) if (!attemptRelocateInvalid(test,1)) continue;
+          const sObj = await scoreOf(test); if (!sObj.ok) continue;
+          const d = sObj.score - baseScore; if (d>bestDelta || (Math.abs(d-bestDelta)<=1e-9 && sObj.L>bestL)){ bestDelta=d; best={x,y}; bestType=type; bestL=sObj.L; }
+        }
+      }
       }
     }
-    if (best && bestDelta>0){ state.entities.push({ type: bestType, x: best.x, y: best.y }); changed=true; }
+    if (best && bestDelta>0){
+      if (typeof bestType === 'object' && bestType.t === EntityTypes.triBox) {
+        state.entities.push({ type: bestType.t, x: best.x, y: best.y, state:{ orient: bestType.o } });
+      } else {
+        state.entities.push({ type: bestType, x: best.x, y: best.y });
+      }
+      changed=true;
+    }
   }
   return changed;
 }
@@ -728,7 +773,7 @@ function mutateEntities(state, opts = {}) {
     }
   }
 
-  // 2) Box operation: add or move one box/heavyBox
+  // 2) Box operation: add or remove one box/heavyBox/triBox
   if (opts.placeBoxes || opts.removeBoxes) {
     // decide which op to do this attempt
     const ops = [];
@@ -748,14 +793,26 @@ function mutateEntities(state, opts = {}) {
     if (pickOp === 'add') {
       if (boxCells.length) {
         const { x, y } = boxCells[Math.floor(Math.random() * boxCells.length)];
-        const type = Math.random() < 0.5 ? EntityTypes.box : EntityTypes.heavyBox;
-        state.entities.push({ type, x, y });
+        const allow = opts.placeTypes || { box:true, heavyBox:true, triBox:true };
+        const types = [];
+        if (allow.box) types.push(EntityTypes.box);
+        if (allow.heavyBox) types.push(EntityTypes.heavyBox);
+        if (allow.triBox) types.push(EntityTypes.triBox);
+        const pickT = types.length ? types[Math.floor(Math.random()*types.length)] : EntityTypes.box;
+        if (pickT === EntityTypes.triBox) {
+          const orients = ['NE','SE','SW','NW'];
+          const o = orients[Math.floor(Math.random()*orients.length)];
+          state.entities.push({ type: pickT, x, y, state: { orient: o } });
+        } else {
+          state.entities.push({ type: pickT, x, y });
+        }
         changed = true;
       }
     } else if (pickOp === 'remove') {
+      const allow = opts.removeTypes || { box:true, heavyBox:true, triBox:true };
       const indices = state.entities
         .map((e, i) => ({ e, i }))
-        .filter(it => it.e.type === EntityTypes.box || it.e.type === EntityTypes.heavyBox)
+        .filter(it => (it.e.type === EntityTypes.box && allow.box) || (it.e.type === EntityTypes.heavyBox && allow.heavyBox) || (it.e.type === EntityTypes.triBox && allow.triBox))
         .map(it => it.i);
       if (indices.length) {
         const idx = indices[Math.floor(Math.random() * indices.length)];
@@ -820,7 +877,7 @@ function attemptRelocateInvalid(state, maxAttempts = 3){
 function isValidInitialPositions(state){
   const tileAt = (x,y)=> (state.base[y][x]||'floor');
   const isPlayer = (e)=> e.type===EntityTypes.player;
-  const isBoxLike = (e)=> e.type===EntityTypes.box || e.type===EntityTypes.heavyBox;
+  const isBoxLike = (e)=> e.type===EntityTypes.box || e.type===EntityTypes.heavyBox || e.type===EntityTypes.triBox;
   const isFragileEnt = (e)=> e.type===EntityTypes.fragileWall;
   const supportsPlayer = (t)=> !isTrait(t,'isWallForPlayer') && !isTrait(t,'isHoleForPlayer') && t!=='exit';
   const supportsBox = (t)=> !isTrait(t,'isWallForBox') && !isTrait(t,'isHoleForBox');
@@ -886,6 +943,10 @@ function ensureZ(rows, cols) {
   const entities = {
     box: makeGrid(),
     heavyBox: makeGrid(),
+    triBox_NE: makeGrid(),
+    triBox_NW: makeGrid(),
+    triBox_SE: makeGrid(),
+    triBox_SW: makeGrid(),
     fragileWall: makeGrid(),
     player_free: makeGrid(),
     player_inbox_r: makeGrid(),
@@ -923,6 +984,11 @@ function stateKey(s) {
         const k = dirKey(e.state?.entryDir);
         h ^= zCache.entities['player_inbox_' + k][e.y][e.x];
       }
+    } else if (e.type === EntityTypes.triBox) {
+      const ori = (e.state && e.state.orient) || 'SE';
+      const key = 'triBox_' + (['NE','NW','SE','SW'].includes(ori) ? ori : 'SE');
+      const grid = zCache.entities[key];
+      if (grid) h ^= grid[e.y][e.x];
     } else {
       const grid = zCache.entities[e.type];
       if (grid) h ^= grid[e.y][e.x];
@@ -945,7 +1011,27 @@ export async function simplifyLevel(inputState, { runSolver, params = {}, preser
   let baseline = await runSolver(current, { ...limits, onProgress: () => {} });
   let baseSig = solverSignature(baseline);
 
-  async function same(sig) { return sameSignature(baseSig, sig, preserveDeadEnds); }
+  function parts(res){
+    const sols = Array.isArray(res?.solutions) ? res.solutions : [];
+    const cnt = sols.length;
+    const minL = cnt ? Math.min(...sols.map(s=>s.length)) : 0;
+    const dead = Array.isArray(res?.deadEnds) ? res.deadEnds.length : 0;
+    return { cnt, minL, dead };
+  }
+  let baseFlex = parts(baseline);
+
+  async function accept(res, sig){
+    if (preserveDeadEnds) return sameSignature(baseSig, sig, true);
+    const p = parts(res);
+    // Flex: keep number of solutions and shortest length unchanged; prefer fewer dead ends
+    if (p.cnt === baseFlex.cnt && p.minL === baseFlex.minL) {
+      if (p.dead <= baseFlex.dead) {
+        baseFlex = p; // tighten baseline toward fewer dead ends
+        return true;
+      }
+    }
+    return false;
+  }
 
   let changed = true;
   while (changed) {
@@ -959,19 +1045,43 @@ export async function simplifyLevel(inputState, { runSolver, params = {}, preser
       (s) => removeColumn(s, 'right')
     ];
     let removed = false;
-    for (const mut of borderMutations) {
-      const next = mut(current);
-      if (!next) continue;
-      const res = await runSolver(next, { ...limits, onProgress: () => {} });
-      const sig = solverSignature(res);
-      if (await same(sig)) {
-        current = next;
-        baseSig = sig;
+    if (preserveDeadEnds) {
+      for (const mut of borderMutations) {
+        const next = mut(current);
+        if (!next) continue;
+        const res = await runSolver(next, { ...limits, onProgress: () => {} });
+        const sig = solverSignature(res);
+        if (sameSignature(baseSig, sig, true)) {
+          current = next;
+          baseSig = sig;
+          removed = true;
+          changed = true;
+          break;
+        }
+        await tick();
+      }
+    } else {
+      // Flex: choose the border removal (if any) that reduces dead ends while keeping sol count and shortest length
+      let best = null;
+      for (const mut of borderMutations) {
+        const next = mut(current);
+        if (!next) continue;
+        const res = await runSolver(next, { ...limits, onProgress: () => {} });
+        const sig = solverSignature(res);
+        const p = parts(res);
+        if (p.cnt === baseFlex.cnt && p.minL === baseFlex.minL && p.dead <= baseFlex.dead) {
+          if (!best || p.dead < best.p.dead) best = { next, res, sig, p };
+        }
+        await tick();
+      }
+      if (best) {
+        current = best.next;
+        // baseSig not used for flex acceptance, but keep it roughly in sync with solutions if needed
+        baseSig = best.sig;
+        baseFlex = best.p;
         removed = true;
         changed = true;
-        break; // restart outer loop to allow cascading removals
       }
-      await tick();
     }
     if (removed) continue;
 
@@ -993,7 +1103,7 @@ export async function simplifyLevel(inputState, { runSolver, params = {}, preser
           testState.base[y][x] = t;
           const res = await runSolver(testState, { ...limits, onProgress: () => {} });
           const sig = solverSignature(res);
-          if (await same(sig)) {
+          if (await accept(res, sig)) {
             current = testState;
             baseSig = sig;
             simplifiedOne = true;
@@ -1005,6 +1115,28 @@ export async function simplifyLevel(inputState, { runSolver, params = {}, preser
       }
     }
     if (simplifiedOne) continue;
+
+    // Try to simplify entities: heavyBox/triBox -> box, one at a time
+    let simplifiedEnt = false;
+    for (let i = 0; i < (current.entities?.length || 0); i++) {
+      const e = current.entities[i];
+      if (!e) continue;
+      if (e.type !== EntityTypes.heavyBox && e.type !== EntityTypes.triBox) continue;
+      const testState = cloneState(current);
+      // Replace entity with a regular box at same position
+      testState.entities = testState.entities.map((en, idx) => idx === i ? { type: EntityTypes.box, x: en.x, y: en.y } : en);
+      const res = await runSolver(testState, { ...limits, onProgress: () => {} });
+      const sig = solverSignature(res);
+      if (await accept(res, sig)) {
+        current = testState;
+        baseSig = sig;
+        changed = true;
+        simplifiedEnt = true;
+        break;
+      }
+      await tick();
+    }
+    if (simplifiedEnt) continue;
   }
 
   return current;
