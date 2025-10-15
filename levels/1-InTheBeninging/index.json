@@ -1,9 +1,5 @@
 [
   "1-boxLearner.json"
-  ,"10-prelude.json"
-  ,"11-preluded.json"
-  ,"12-movePlease.json"
-  ,"13-andNowWhat.json"
   ,"2-stickySituation.json"
   ,"3-getPushy.json"
   ,"4-geronimoo.json"
@@ -12,4 +8,8 @@
   ,"7-letMeIn.json"
   ,"8-whatHaveYouDone.json"
   ,"9-whatHaveIDone.json"
+  ,"10-prelude.json"
+  ,"11-preluded.json"
+  ,"12-movePlease.json"
+  ,"13-andNowWhat.json"
 ]
