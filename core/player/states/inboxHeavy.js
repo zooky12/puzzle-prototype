@@ -4,7 +4,7 @@ import { firstEntityAt, moveEntity, removeEntityAt } from '../../state.js';
 import { EntityTypes, isPushable, isSolid } from '../../entities.js';
 import { planPushChain, applyPushChain, applyPushChainWithFall } from '../../motion/push.js';
 import { resolveFlight } from '../../motion/flight.js';
-import { effectEntityMoved, effectBoxFell } from '../../engine/effects.js';
+import { effectEntityMoved, effectBoxFell, effectPlayerLaunched, effectPlayerExitedBox, effectHeavyNeutral } from '../../engine/effects.js';
 
 function inBounds(state, x, y) { return x >= 0 && x < state.size.cols && y >= 0 && y < state.size.rows; }
 function tileAt(state, x, y) { return state.base[y][x] || 'floor'; }
@@ -45,6 +45,11 @@ export function handleInput(state, player, { dx, dy }) {
       ? { mode: 'inbox', entryDir: res.entryDir }
       : { mode: 'free', entryDir: { dx: 0, dy: 0 } };
     effects.push(effectEntityMoved({ type: 'player' }, { x: px, y: py }, { x: player.x, y: player.y }));
+    const dist = Math.abs(player.x - px) + Math.abs(player.y - py);
+    effects.push(effectPlayerLaunched({ x: px, y: py }, { x: player.x, y: player.y }, { dx, dy }, dist));
+    if (player.state.mode === 'free') {
+      effects.push(effectPlayerExitedBox(under.type, { x: player.x, y: player.y }, { dx, dy }));
+    }
     effects.push(...(res.effects || []));
     return { newState: state, effects, changed: true };
   }
@@ -94,6 +99,7 @@ export function handleInput(state, player, { dx, dy }) {
     const pFrom = { x: px, y: py }, pTo = { x: toHb.x, y: toHb.y };
     player.x = pTo.x; player.y = pTo.y;
     player.state.entryDir = { dx: 0, dy: 0 };
+    effects.push(effectHeavyNeutral({ x: player.x, y: player.y }, true));
     effects.push(effectEntityMoved({ type: 'player' }, pFrom, pTo));
     return { newState: state, effects, changed: true };
   }
@@ -106,6 +112,7 @@ export function handleInput(state, player, { dx, dy }) {
 
     // No front pushable: set opposite and move heavy (or fall)
     player.state.entryDir = { dx: -dx, dy: -dy };
+    effects.push(effectHeavyNeutral({ x: px, y: py }, false));
     if (isTrait(targetTile, 'isHoleForBox')) {
       removeEntityAt(state, px, py, (e) => e === under);
       effects.push(effectBoxFell({ x: tx, y: ty }));

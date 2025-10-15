@@ -4,7 +4,7 @@ import { firstEntityAt, moveEntity, removeEntityAt } from '../../state.js';
 import { EntityTypes, isPushable, isSolid } from '../../entities.js';
 import { planPushChain, applyPushChain, applyPushChainWithFall } from '../../motion/push.js';
 import { resolveFlight } from '../../motion/flight.js';
-import { effectEntityMoved, effectBoxFell } from '../../engine/effects.js';
+import { effectEntityMoved, effectBoxFell, effectPlayerLaunched, effectPlayerExitedBox } from '../../engine/effects.js';
 
 function inBounds(state, x, y) { return x >= 0 && x < state.size.cols && y >= 0 && y < state.size.rows; }
 function tileAt(state, x, y) { return state.base[y][x] || 'floor'; }
@@ -57,6 +57,11 @@ export function handleInput(state, player, { dx, dy }) {
       ? { mode: 'inbox', entryDir: res.entryDir }
       : { mode: 'free', entryDir: { dx: 0, dy: 0 } };
     effects.push(effectEntityMoved({ type: 'player' }, { x: px, y: py }, { x: player.x, y: player.y }));
+    const dist = Math.abs(player.x - px) + Math.abs(player.y - py);
+    effects.push(effectPlayerLaunched({ x: px, y: py }, { x: player.x, y: player.y }, { dx, dy }, dist));
+    if (player.state.mode === 'free') {
+      effects.push(effectPlayerExitedBox(under.type, { x: player.x, y: player.y }, { dx, dy }));
+    }
     effects.push(...(res.effects || []));
     return { newState: state, effects, changed: true };
   }
@@ -74,6 +79,11 @@ export function handleInput(state, player, { dx, dy }) {
       ? { mode: 'inbox', entryDir: res.entryDir }
       : { mode: 'free', entryDir: { dx: 0, dy: 0 } };
     effects.push(effectEntityMoved({ type: 'player' }, { x: px, y: py }, { x: player.x, y: player.y }));
+    const dist2 = Math.abs(player.x - px) + Math.abs(player.y - py);
+    effects.push(effectPlayerLaunched({ x: px, y: py }, { x: player.x, y: player.y }, { dx, dy }, dist2));
+    if (player.state.mode === 'free') {
+      effects.push(effectPlayerExitedBox(under.type, { x: player.x, y: player.y }, { dx, dy }));
+    }
     effects.push(...(res.effects || []));
     return { newState: state, effects, changed: true };
   }

@@ -2,7 +2,7 @@
 import { isTrait } from '../../tiles.js';
 import { firstEntityAt } from '../../state.js';
 import { isPushable, isSolid } from '../../entities.js';
-import { effectEntityMoved } from '../../engine/effects.js';
+import { effectEntityMoved, effectPlayerEnteredBox } from '../../engine/effects.js';
 
 function inBounds(state, x, y) {
   return x >= 0 && x < state.size.cols && y >= 0 && y < state.size.rows;
@@ -28,6 +28,7 @@ export function handleInput(state, player, { dx, dy }) {
     const from = { x: px, y: py }, to = { x: tx, y: ty };
     player.x = to.x; player.y = to.y;
     effects.push(effectEntityMoved({ type: 'player' }, from, to));
+    effects.push(effectPlayerEnteredBox(pushableFront.type, to, { dx, dy }));
     return { newState: state, effects, changed: true };
   }
 
@@ -39,4 +40,3 @@ export function handleInput(state, player, { dx, dy }) {
   effects.push(effectEntityMoved({ type: 'player' }, from, to));
   return { newState: state, effects, changed: true };
 }
-

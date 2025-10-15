@@ -662,7 +662,7 @@
 
   <script type="module">
     import { createEmptyState, cloneState, ensurePlayerValidPosition } from './core/state.js';
-    import { draw, initCanvas, animate } from './ui/canvas.js';
+    import { draw, initCanvas, animate, setRedraw } from './ui/canvas.js';
     import { setupBuildUI } from './ui/build.js';
     import { setupHUD } from './ui/hud.js';
     import { loadLevelList, loadLevel, exportLevel, importLevel } from './ui/io.js';
@@ -671,6 +671,8 @@
     import { setupAutoUI, simplifyLevel } from './ui/auto.js';
     import { runSolver, cancelSolver } from './solver/solver.js';
     import { isTrait } from './core/tiles.js';
+    import { findPlayer } from './core/state.js';
+    import { SFX } from './ui/sfx.js';
 
     // Globals (minimum for the UI)
     let state = createEmptyState(12, 12);
@@ -681,6 +683,8 @@
 
     const canvasEl = document.getElementById('game');
     initCanvas(canvasEl);
+    setRedraw(() => draw(state));
+    const sfx = new SFX();
 
     function setGameState(type, message) {
       gameState = type;
@@ -702,6 +706,8 @@
 
     function refresh() { draw(state); }
     function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+    let nextReadyAt = 0; // input cooldown for moves
+    const MOVE_COOLDOWN_MS = 100;
 
     async function refreshLevelDropdown() {
       const list = await loadLevelList();
@@ -1138,13 +1144,20 @@ if (best) {
         if (Math.abs(dxp) < minDist && Math.abs(dyp) < minDist) return;
         if (Math.abs(dxp) > Math.abs(dyp)) dx = dxp > 0 ? 1 : -1;
         else dy = dyp > 0 ? 1 : -1;
+        if (Date.now() < nextReadyAt) { if (ev.cancelable) ev.preventDefault(); return; }
         if (gameState) return;
         const res = stepMove(state, { dx, dy });
-        if (!res.changed) return;
+        if (!res.changed) {
+          const p = findPlayer(state);
+          if (p) { animate([{ type:'bump', pos:{ x:p.x, y:p.y }, dir:{ dx, dy } }]); sfx.bump(); }
+          if (ev.cancelable) ev.preventDefault();
+          return;
+        }
         undoStack.push(cloneState(state));
-        state = res.newState; animate(res.effects); refresh();
-        if (isLosingState(state)) setGameState('lose', 'Game Over - fell into hole or box fell');
-        else if (isWinningState(state)) setGameState('win', 'You Win!');
+        state = res.newState; animate(res.effects); sfx.playEffects(res.effects, state); refresh();
+        nextReadyAt = Date.now() + MOVE_COOLDOWN_MS;
+        if (isLosingState(state)) { setGameState('lose', 'Game Over - fell into hole or box fell'); const p = findPlayer(state); if (p) animate([{ type:'playerFell', pos:{x:p.x,y:p.y}}]); sfx.fallThud(); sfx.loseTone(); }
+        else if (isWinningState(state)) { setGameState('win', 'You Win!'); const p = findPlayer(state); if (p) animate([{ type:'levelWin', pos:{x:p.x,y:p.y}}]); sfx.winJingle(); setTimeout(()=>sfx.cracklePop(), 50); setTimeout(()=>sfx.cracklePop(), 90); }
         else setGameState(null);
         if (ev.cancelable) ev.preventDefault();
       }
@@ -1176,17 +1189,24 @@ if (best) {
 
       e.preventDefault();
       if (gameState) return;
+      if (Date.now() < nextReadyAt) return;
 
       const { newState, effects, changed } = stepMove(state, { dx, dy });
-      if (!changed) return;
+      if (!changed) {
+        const p = findPlayer(state);
+        if (p) { animate([{ type:'bump', pos:{ x:p.x, y:p.y }, dir:{ dx, dy } }]); sfx.bump(); }
+        return;
+      }
 
       undoStack.push(cloneState(state));
       state = newState;
       animate(effects);
+      sfx.playEffects(effects, state);
       refresh();
+      nextReadyAt = Date.now() + MOVE_COOLDOWN_MS;
 
-      if (isLosingState(state)) setGameState('lose', 'Game Over - fell into hole or box fell');
-      else if (isWinningState(state)) setGameState('win', 'You Win!');
+      if (isLosingState(state)) { setGameState('lose', 'Game Over - fell into hole or box fell'); const p = findPlayer(state); if (p) animate([{ type:'playerFell', pos:{x:p.x,y:p.y}}]); sfx.fallThud(); sfx.loseTone(); }
+      else if (isWinningState(state)) { setGameState('win', 'You Win!'); const p = findPlayer(state); if (p) animate([{ type:'levelWin', pos:{x:p.x,y:p.y}}]); sfx.winJingle(); setTimeout(()=>sfx.cracklePop(), 50); setTimeout(()=>sfx.cracklePop(), 90); }
       else setGameState(null);
     });
 

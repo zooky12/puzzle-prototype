@@ -1,6 +1,7 @@
 // ui/canvas.js
 import { computeExitActive } from '../core/goals.js';
 import { EntityTypes } from '../core/entities.js';
+import { firstEntityAt } from '../core/state.js';
 
 let canvas;
 let ctx;
@@ -81,6 +82,63 @@ function drawInboxOverlay(x, y, entryDir) {
   ctx.save();
   ctx.strokeStyle = '#333';
   ctx.strokeRect(px + inset, py + inset, w, h);
+  ctx.restore();
+}
+
+// Triangle helpers
+function longDirsForOrient(orient) {
+  switch (orient) {
+    case 'NE': return [{ dx: 0, dy: 1 }, { dx: -1, dy: 0 }];
+    case 'NW': return [{ dx: 1, dy: 0 }, { dx: 0, dy: 1 }];
+    case 'SE': return [{ dx: 0, dy: -1 }, { dx: -1, dy: 0 }];
+    case 'SW': return [{ dx: 0, dy: -1 }, { dx: 1, dy: 0 }];
+    default:   return [{ dx: 0, dy: 1 }, { dx: -1, dy: 0 }];
+  }
+}
+function dirEq(a,b){ return !!a && !!b && a.dx===b.dx && a.dy===b.dy; }
+
+function drawTriPlayerOverlay(x, y, orient, entryDir) {
+  const px = x * tileSize;
+  const py = y * tileSize;
+  const inset = Math.max(4, Math.floor(tileSize * 0.12));
+  const xL = px + inset, xR = px + tileSize - inset;
+  const yT = py + inset, yB = py + tileSize - inset;
+
+  // Build triangle clip
+  ctx.save();
+  ctx.beginPath();
+  if (orient === 'NE') { ctx.moveTo(xR, yT); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+  else if (orient === 'NW') { ctx.moveTo(xL, yT); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+  else if (orient === 'SE') { ctx.moveTo(xR, yB); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+  else /* SW */ { ctx.moveTo(xL, yB); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+  ctx.closePath();
+  ctx.clip();
+
+  const longDirs = longDirsForOrient(orient);
+  const enteredFromShort = longDirs.some(ld => dirEq(ld, entryDir));
+  ctx.strokeStyle = colors.player;
+  ctx.fillStyle = colors.player;
+
+  if (!enteredFromShort) {
+    // Along hypotenuse: thick diagonal stroke inside triangle
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(6, Math.floor(tileSize * 0.28));
+    let x1, y1, x2, y2;
+    if (orient === 'NE' || orient === 'SW') { x1 = xL; y1 = yT; x2 = xR; y2 = yB; }
+    else { x1 = xR; y1 = yT; x2 = xL; y2 = yB; }
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  } else {
+    // Hug the short side indicated by entryDir
+    const thickness = Math.max(6, Math.floor(tileSize * 0.28));
+    if (entryDir.dy === 1) ctx.fillRect(xL, yT, xR - xL, thickness); // North
+    if (entryDir.dy === -1) ctx.fillRect(xL, yB - thickness, xR - xL, thickness); // South
+    if (entryDir.dx === -1) ctx.fillRect(xR - thickness, yT, thickness, yB - yT); // East
+    if (entryDir.dx === 1) ctx.fillRect(xL, yT, thickness, yB - yT); // West
+  }
+
   ctx.restore();
 }
 
@@ -230,8 +288,16 @@ export function draw(state) {
 
   const player = state.entities.find(e => e.type === EntityTypes.player);
 
+  // Build suppression set from active animations so we don't double-draw
+  const suppressed = new Set();
+  for (const tw of _anims.tweens) {
+    if (tw.kind === 'moveBox') suppressed.add(`${tw.entityType}@${tw.to.x},${tw.to.y}`);
+    if (tw.kind === 'movePlayer' || tw.kind === 'launchPlayer') _anims.suppressPlayer = true;
+  }
+
   for (const entity of state.entities) {
     if (entity.type === EntityTypes.player) continue;
+    if (suppressed.has(`${entity.type}@${entity.x},${entity.y}`)) continue;
     const color = entity.type === EntityTypes.box
       ? colors.box
       : (entity.type === EntityTypes.heavyBox ? colors.heavyBox : (entity.type === EntityTypes.triBox ? colors.triBox : colors.fragile));
@@ -320,18 +386,221 @@ export function draw(state) {
 
   if (!player) return;
 
-  if (player.state?.mode === 'inbox') {
-    drawInboxOverlay(player.x, player.y, player.state.entryDir);
-  } else {
-    ctx.fillStyle = colors.player;
-    const cx = player.x * tileSize + tileSize / 2;
-    const cy = player.y * tileSize + tileSize / 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, tileSize * 0.32, 0, Math.PI * 2);
-    ctx.fill();
+  if (!_anims.suppressPlayer) {
+    if (player.state?.mode === 'inbox') {
+      // Choose overlay by box type under player
+      const under = firstEntityAt(state, player.x, player.y, (e) => e.type === EntityTypes.box || e.type === EntityTypes.heavyBox || e.type === EntityTypes.triBox);
+      if (under && under.type === EntityTypes.triBox) {
+        const orient = (under.state && under.state.orient) || 'NE';
+        drawTriPlayerOverlay(player.x, player.y, orient, player.state.entryDir);
+      } else if (under && under.type === EntityTypes.heavyBox && (player.state.entryDir?.dx === 0 && player.state.entryDir?.dy === 0)) {
+        // Heavy neutral: full blue square overlay
+        const px = player.x * tileSize + 4;
+        const py = player.y * tileSize + 4;
+        const s = tileSize - 8;
+        ctx.fillStyle = colors.player;
+        ctx.fillRect(px, py, s, s);
+        ctx.strokeStyle = '#333';
+        ctx.strokeRect(px, py, s, s);
+      } else {
+        drawInboxOverlay(player.x, player.y, player.state.entryDir);
+      }
+    } else {
+      ctx.save();
+      ctx.translate(_anims.bumpOffset.x, _anims.bumpOffset.y);
+      ctx.fillStyle = colors.player;
+      const cx = player.x * tileSize + tileSize / 2;
+      const cy = player.y * tileSize + tileSize / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, tileSize * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   }
+
+  // Draw animated overlays (moving boxes and player)
+  for (const tw of _anims.tweens) {
+    const t = Math.max(0, Math.min(1, tw.t));
+    if (tw.kind === 'moveBox') {
+      const x = (tw.from.x + (tw.to.x - tw.from.x) * t) * tileSize + 4;
+      const y = (tw.from.y + (tw.to.y - tw.from.y) * t) * tileSize + 4;
+      const s = tileSize - 8;
+      ctx.fillStyle = tw.color;
+      if (tw.entityType === EntityTypes.triBox) {
+        // Draw triangle at tweened position using provided orient if any
+        const orient = tw.orient || 'NE';
+        const px2 = x - 4; // reverse +4 inset
+        const py2 = y - 4;
+        const inset = Math.max(4, Math.floor(tileSize * 0.12));
+        const xL = px2 + inset, xR = px2 + tileSize - inset;
+        const yT = py2 + inset, yB = py2 + tileSize - inset;
+        ctx.beginPath();
+        if (orient === 'NE') { ctx.moveTo(xR, yT); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+        else if (orient === 'NW') { ctx.moveTo(xL, yT); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+        else if (orient === 'SE') { ctx.moveTo(xR, yB); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+        else { ctx.moveTo(xL, yB); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(x, y, s, s);
+      }
+      } else if (tw.kind === 'movePlayer' || tw.kind === 'launchPlayer') {
+      const x = (tw.from.x + (tw.to.x - tw.from.x) * t) * tileSize + tileSize / 2 + (tw.kind === 'movePlayer' ? _anims.bumpOffset.x : 0);
+      const y = (tw.from.y + (tw.to.y - tw.from.y) * t) * tileSize + tileSize / 2 + (tw.kind === 'movePlayer' ? _anims.bumpOffset.y : 0);
+      ctx.fillStyle = colors.player;
+      ctx.beginPath();
+      ctx.arc(x, y, tileSize * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // Particles on top
+  drawParticles();
+}
+
+// Animation system
+const _anims = {
+  tweens: [], // { kind, from, to, t, dt, duration, entityType?, color?, orient? }
+  running: false,
+  suppressPlayer: false,
+  bumpOffset: { x: 0, y: 0 },
+  redraw: null,
+  particles: [] // { x,y, vx,vy, life, color, size }
+};
+
+export function setRedraw(fn) { _anims.redraw = fn; }
+
+function easeOutCubic(u){ return 1 - Math.pow(1-u, 3); }
+function easeInOutQuad(u){ return u<0.5 ? 2*u*u : 1 - Math.pow(-2*u+2,2)/2; }
+
+function ensureLoop(){
+  if (_anims.running) return;
+  _anims.running = true;
+  let last = performance.now();
+  function frame(now){
+    const dt = Math.min(32, now - last); // cap dt
+    last = now;
+    _anims.suppressPlayer = false;
+    // advance tweens
+    _anims.tweens = _anims.tweens.filter(tw => {
+      tw.elapsed = (tw.elapsed || 0) + dt;
+      const u = Math.max(0, Math.min(1, tw.elapsed / tw.duration));
+      tw.t = tw.ease ? tw.ease(u) : u;
+      return u < 1;
+    });
+
+    // bump offset decay
+    if (_anims.bumpDecay) {
+      _anims.bumpDecay -= dt;
+      const f = Math.max(0, _anims.bumpDecay / _anims.bumpDuration);
+      _anims.bumpOffset.x = _anims.bumpBase.x * f;
+      _anims.bumpOffset.y = _anims.bumpBase.y * f;
+      if (_anims.bumpDecay <= 0) { _anims.bumpOffset.x = 0; _anims.bumpOffset.y = 0; _anims.bumpDecay = 0; }
+    }
+
+    // advance particles
+    if (_anims.particles && _anims.particles.length) {
+      for (const p of _anims.particles) {
+        p.life -= dt;
+        p.x += p.vx * (dt / 1000);
+        p.y += p.vy * (dt / 1000);
+        p.vy += (p.ay || 0) * (dt / 1000);
+      }
+      _anims.particles = _anims.particles.filter(p => p.life > 0);
+    }
+
+    if (_anims.redraw) _anims.redraw();
+    if (_anims.tweens.length || _anims.bumpDecay > 0) {
+      requestAnimationFrame(frame);
+    } else {
+      // keep loop running briefly if particles exist
+      if (_anims.particles && _anims.particles.length) {
+        requestAnimationFrame(frame);
+      } else {
+        _anims.running = false;
+      }
+    }
+  }
+  requestAnimationFrame(frame);
 }
 
 export function animate(effects) {
-  // Placeholder for future animations
+  const toAdd = [];
+  let hasPlayerLaunch = false;
+  let playerLaunchFrom = null, playerLaunchTo = null;
+  // Build tweens from effects
+  for (const ef of effects || []) {
+    if (ef.type === 'entityMoved') {
+      if (ef.entityType === EntityTypes.player) {
+        // Player step move (skip if a launch effect also exists)
+        if (!hasPlayerLaunch) {
+          toAdd.push({ kind: 'movePlayer', from: ef.from, to: ef.to, duration: 90, ease: easeOutCubic });
+        }
+      } else if (ef.entityType === EntityTypes.box || ef.entityType === EntityTypes.heavyBox || ef.entityType === EntityTypes.triBox) {
+        const color = ef.entityType === EntityTypes.box ? colors.box : (ef.entityType === EntityTypes.heavyBox ? colors.heavyBox : colors.triBox);
+        toAdd.push({ kind: 'moveBox', entityType: ef.entityType, color, orient: ef.orient, from: ef.from, to: ef.to, duration: 90, ease: easeOutCubic });
+      }
+    } else if (ef.type === 'playerLaunched') {
+      hasPlayerLaunch = true; playerLaunchFrom = ef.from; playerLaunchTo = ef.to;
+      const duration = 100; // cap to 0.1s max
+      toAdd.push({ kind: 'launchPlayer', from: ef.from, to: ef.to, duration, ease: easeInOutQuad });
+    } else if (ef.type === 'bump') {
+      // 1-tap bump shake of player sprite
+      const amp = Math.max(2, Math.floor(tileSize * 0.08));
+      _anims.bumpBase = { x: (ef.dir?.dx||0) * amp, y: (ef.dir?.dy||0) * amp };
+      _anims.bumpDuration = 80; _anims.bumpDecay = 80;
+    } else if (ef.type === 'boxFell') {
+      // quick fall ring burst
+      spawnParticlesBurst(ef.pos, 16, 220, 100, ['#e8e1d1','#ffffff','#b3b3b3']);
+    } else if (ef.type === 'heavyNeutral') {
+      // pulse particles to show neutral toggle
+      const cols = ef.neutral ? ['#4c3ce7'] : ['#7faaff'];
+      spawnParticlesBurst(ef.pos, 10, 240, 90, cols);
+    } else if (ef.type === 'levelWin') {
+      spawnParticlesBurst(ef.pos || {x:0,y:0}, 28, 280, 100, ['#62f2c1','#7faaff','#ffd166','#ff6b6b']);
+    } else if (ef.type === 'playerFell') {
+      spawnParticlesBurst(ef.pos, 20, 240, 100, ['#ffffff','#c1c1c1']);
+    }
+  }
+
+  // If playerLaunch present, remove any pending movePlayer for same segment
+  if (hasPlayerLaunch) {
+    // filter out any movePlayer we just added that matches this segment
+    for (let i = toAdd.length - 1; i >= 0; i--) {
+      const tw = toAdd[i];
+      if (tw.kind === 'movePlayer' && tw.from && tw.to && playerLaunchFrom && playerLaunchTo) {
+        if (tw.from.x === playerLaunchFrom.x && tw.from.y === playerLaunchFrom.y && tw.to.x === playerLaunchTo.x && tw.to.y === playerLaunchTo.y) {
+          toAdd.splice(i, 1);
+        }
+      }
+    }
+  }
+
+  _anims.tweens.push(...toAdd);
+  if (toAdd.length || (_anims.particles && _anims.particles.length)) ensureLoop();
+}
+
+function spawnParticlesBurst(cell, count, speed, life, colorsList) {
+  const baseX = cell.x * tileSize + tileSize / 2;
+  const baseY = cell.y * tileSize + tileSize / 2;
+  for (let i = 0; i < count; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const sp = speed * (0.6 + Math.random() * 0.8);
+    _anims.particles.push({
+      x: baseX,
+      y: baseY,
+      vx: Math.cos(ang) * sp,
+      vy: Math.sin(ang) * sp,
+      ay: 0,
+      life: life * (0.6 + Math.random() * 0.6),
+      color: colorsList[Math.floor(Math.random() * colorsList.length)],
+      size: Math.max(2, Math.floor(tileSize * 0.06))
+    });
+  }
+}
+
+function drawParticles() {
+  for (const p of _anims.particles) {
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
 }
