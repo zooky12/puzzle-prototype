@@ -100,26 +100,11 @@ export function handleInput(state, player, { dx, dy }) {
 
   // Case B: neutral -> set opposite(dir)
   if (entryZero) {
+    // In neutral, heavy cannot push other boxes: treat a pushable in front as a wall
+    if (frontPushable) return { newState: state, effects, changed: false };
     if (blockedForBox) return { newState: state, effects, changed: false };
-    if (frontPushable) {
-      const plan = planPushChain(state, tx, ty, dx, dy);
-      if (!plan.ok) return { newState: state, effects, changed: false };
-      if (plan.endIsHole) {
-        effects.push(...applyPushChainWithFall(state, plan.chain, dx, dy));
-      } else {
-        effects.push(...applyPushChain(state, plan.chain, dx, dy));
-      }
-      const fromHb = { x: px, y: py }, toHb = { x: px + dx, y: py + dy };
-      moveEntity(state, under, toHb.x, toHb.y);
-      effects.push(effectEntityMoved(under, fromHb, toHb));
-      const pFrom = { x: px, y: py }, pTo = { x: toHb.x, y: toHb.y };
-      player.x = pTo.x; player.y = pTo.y;
-      player.state.entryDir = { dx: -dx, dy: -dy };
-      effects.push(effectEntityMoved({ type: 'player' }, pFrom, pTo));
-      return { newState: state, effects, changed: true };
-    }
 
-    // no front pushable: set opposite and move heavy (or fall)
+    // No front pushable: set opposite and move heavy (or fall)
     player.state.entryDir = { dx: -dx, dy: -dy };
     if (isTrait(targetTile, 'isHoleForBox')) {
       removeEntityAt(state, px, py, (e) => e === under);
@@ -174,4 +159,3 @@ export function handleInput(state, player, { dx, dy }) {
   effects.push(effectEntityMoved({ type: 'player' }, pFrom, pTo));
   return { newState: state, effects, changed: true };
 }
-
