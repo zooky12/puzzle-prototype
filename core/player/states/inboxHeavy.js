@@ -86,7 +86,7 @@ export function handleInput(state, player, { dx, dy }) {
     if (isTrait(targetTile, 'isHoleForBox')) {
       const pFrom = { x: px, y: py };
       removeEntityAt(state, px, py, (e) => e === under);
-      effects.push(effectBoxFell({ x: tx, y: ty }));
+      effects.push(effectBoxFell({ x: tx, y: ty }, { boxType: under.type, orient: under.state && under.state.orient, playerInside: true }));
       player.x = tx; player.y = ty;
       player.state.entryDir = { dx: 0, dy: 0 };
       effects.push(effectEntityMoved({ type: 'player' }, pFrom, { x: player.x, y: player.y }));
@@ -115,7 +115,7 @@ export function handleInput(state, player, { dx, dy }) {
     effects.push(effectHeavyNeutral({ x: px, y: py }, false));
     if (isTrait(targetTile, 'isHoleForBox')) {
       removeEntityAt(state, px, py, (e) => e === under);
-      effects.push(effectBoxFell({ x: tx, y: ty }));
+      effects.push(effectBoxFell({ x: tx, y: ty }, { boxType: under.type, orient: under.state && under.state.orient, playerInside: true }));
       const pFrom = { x: px, y: py };
       player.x = tx; player.y = ty;
       effects.push(effectEntityMoved({ type: 'player' }, pFrom, { x: player.x, y: player.y }));

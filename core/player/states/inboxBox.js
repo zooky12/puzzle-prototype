@@ -81,7 +81,7 @@ export function handleInput(state, player, { dx, dy }) {
   if (isTrait(targetTile, 'isHoleForBox')) {
     // the box under the player falls
     removeEntityAt(state, px, py, (e) => e === under);
-    effects.push(effectBoxFell({ x: tx, y: ty }));
+    effects.push(effectBoxFell({ x: tx, y: ty }, { boxType: under.type, orient: under.state && under.state.orient, playerInside: true }));
     const pFrom = { x: px, y: py };
     player.x = tx; player.y = ty;
     effects.push(effectEntityMoved({ type: 'player' }, pFrom, { x: player.x, y: player.y }));

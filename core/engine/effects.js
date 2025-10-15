@@ -10,8 +10,9 @@ export function effectTileChanged(pos, from, to) {
   return { type: 'tileChanged', pos, from, to };
 }
 
-export function effectBoxFell(pos) {
-  return { type: 'boxFell', pos };
+export function effectBoxFell(pos, info = {}) {
+  // info can include: { boxType, orient, playerInside }
+  return { type: 'boxFell', pos, ...info };
 }
 
 // Heavy box: entering/exiting neutral state visual cue

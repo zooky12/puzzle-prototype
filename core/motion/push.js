@@ -59,9 +59,8 @@ export function applyPushChainWithFall(state, chain, dx, dy) {
   const last = chain[chain.length - 1];
   const lastFrom = { x: last.x, y: last.y };
   removeEntityAt(state, last.x, last.y, (e) => e === last);
-  effects.push(effectBoxFell({ x: lastFrom.x + dx, y: lastFrom.y + dy }));
+  effects.push(effectBoxFell({ x: lastFrom.x + dx, y: lastFrom.y + dy }, { boxType: last.type, orient: last.state && last.state.orient }));
   const before = chain.slice(0, -1);
   effects.push(...applyPushChain(state, before, dx, dy));
   return effects;
 }
-

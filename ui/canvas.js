@@ -293,6 +293,12 @@ export function draw(state) {
   for (const tw of _anims.tweens) {
     if (tw.kind === 'moveBox') suppressed.add(`${tw.entityType}@${tw.to.x},${tw.to.y}`);
     if (tw.kind === 'movePlayer' || tw.kind === 'launchPlayer') _anims.suppressPlayer = true;
+    if (tw.kind === 'fallShrink' && tw.entityType === 'player') _anims.suppressPlayer = true;
+    if (tw.kind === 'fallShrink' && tw.entityType !== 'player') {
+      // hide player if they are in the same tile as a falling box
+      const p = player;
+      if (p && p.x === tw.pos.x && p.y === tw.pos.y) _anims.suppressPlayer = true;
+    }
   }
 
   for (const entity of state.entities) {
@@ -451,6 +457,72 @@ export function draw(state) {
       ctx.beginPath();
       ctx.arc(x, y, tileSize * 0.32, 0, Math.PI * 2);
       ctx.fill();
+    } else if (tw.kind === 'fallShrink') {
+      // Shrink and darken into hole; use exact icon for entity type
+      const cellX = tw.pos.x * tileSize;
+      const cellY = tw.pos.y * tileSize;
+      const cx = cellX + tileSize / 2;
+      const cy = cellY + tileSize / 2;
+      const k = 1 - t; // scale
+      const darkA = 0.35 + 0.45 * t; // more dark over time
+      ctx.save();
+      if (tw.entityType === 'player') {
+        // Player circle
+        ctx.globalAlpha = Math.max(0.05, 1 - 0.7 * t);
+        ctx.fillStyle = colors.player;
+        ctx.beginPath();
+        ctx.arc(cx, cy, tileSize * 0.32 * k, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = darkA;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(cx, cy, tileSize * 0.32 * k, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (tw.entityType === EntityTypes.triBox) {
+        // Triangle, draw full-size then scale around center
+        const inset = Math.max(4, Math.floor(tileSize * 0.12));
+        const xL = cellX + inset, xR = cellX + tileSize - inset;
+        const yT = cellY + inset, yB = cellY + tileSize - inset;
+        const orient = tw.orient || 'NE';
+        ctx.save();
+        ctx.translate(cx, cy); ctx.scale(k, k); ctx.translate(-cx, -cy);
+        ctx.globalAlpha = Math.max(0.05, 1 - 0.7 * t);
+        ctx.fillStyle = colors.triBox;
+        ctx.beginPath();
+        if (orient === 'NE') { ctx.moveTo(xR, yT); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+        else if (orient === 'NW') { ctx.moveTo(xL, yT); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+        else if (orient === 'SE') { ctx.moveTo(xR, yB); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+        else { ctx.moveTo(xL, yB); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = darkA;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        if (orient === 'NE') { ctx.moveTo(xR, yT); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+        else if (orient === 'NW') { ctx.moveTo(xL, yT); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+        else if (orient === 'SE') { ctx.moveTo(xR, yB); ctx.lineTo(xR, yT); ctx.lineTo(xL, yB); }
+        else { ctx.moveTo(xL, yB); ctx.lineTo(xL, yT); ctx.lineTo(xR, yB); }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // Box/heavy as square, drawn via scale transform so it shrinks to center
+        const inset = 4;
+        const bx = cellX + inset;
+        const by = cellY + inset;
+        const s = tileSize - inset * 2;
+        const color = tw.entityType === EntityTypes.heavyBox ? colors.heavyBox : colors.box;
+        ctx.save();
+        ctx.translate(cx, cy); ctx.scale(k, k); ctx.translate(-cx, -cy);
+        ctx.globalAlpha = Math.max(0.05, 1 - 0.7 * t);
+        ctx.fillStyle = color;
+        ctx.fillRect(bx, by, s, s);
+        ctx.globalAlpha = darkA;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(bx, by, s, s);
+        ctx.restore();
+      }
+      ctx.restore();
     }
   }
   // Particles on top
@@ -549,8 +621,9 @@ export function animate(effects) {
       _anims.bumpBase = { x: (ef.dir?.dx||0) * amp, y: (ef.dir?.dy||0) * amp };
       _anims.bumpDuration = 80; _anims.bumpDecay = 80;
     } else if (ef.type === 'boxFell') {
-      // quick fall ring burst
+      // quick fall ring burst + shrink/darken, preserve box icon and orientation
       spawnParticlesBurst(ef.pos, 16, 220, 100, ['#e8e1d1','#ffffff','#b3b3b3']);
+      toAdd.push({ kind: 'fallShrink', entityType: ef.boxType || 'box', orient: ef.orient, pos: ef.pos, duration: 500, ease: easeInOutQuad });
     } else if (ef.type === 'heavyNeutral') {
       // pulse particles to show neutral toggle
       const cols = ef.neutral ? ['#4c3ce7'] : ['#7faaff'];
@@ -559,6 +632,7 @@ export function animate(effects) {
       spawnParticlesBurst(ef.pos || {x:0,y:0}, 28, 280, 100, ['#62f2c1','#7faaff','#ffd166','#ff6b6b']);
     } else if (ef.type === 'playerFell') {
       spawnParticlesBurst(ef.pos, 20, 240, 100, ['#ffffff','#c1c1c1']);
+      toAdd.push({ kind: 'fallShrink', entityType: 'player', pos: ef.pos, duration: 100, ease: easeInOutQuad });
     }
   }
 
