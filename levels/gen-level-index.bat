@@ -1,77 +1,112 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-chcp 65001 >nul
-
-REM --- This batch should be inside the "levels" folder ---
 pushd "%~dp0" >nul 2>&1
 
-set "TMPFILE=%TEMP%\worlds.tmp"
-set "UPDATED="
+rem ---- temp workspace
+set "TMP=%TEMP%\gen_levels_%RANDOM%%RANDOM%"
+md "%TMP%" >nul 2>&1
 
-REM ---------------------------------------------------------
-REM 1) Generate worlds.json (list of subfolders)
-REM ---------------------------------------------------------
-> "%TMPFILE%" echo [
+rem ================= A) worlds.json =================
+set "WORLDS_RAW=%TMP%\worlds.raw"
+set "WORLDS_KEEP=%TMP%\worlds.keep"
+set "WORLDS_SORT=%TMP%\worlds.sort"
+del /f /q "%WORLDS_RAW%" "%WORLDS_KEEP%" "%WORLDS_SORT%" >nul 2>&1
+
+dir /b /ad > "%WORLDS_RAW%" 2>nul
+
+if not exist "%WORLDS_RAW%" (
+  > "worlds.json" echo [
+  >>"worlds.json" echo ]
+  goto :MAIN
+)
+
+for /f "usebackq delims=" %%D in ("%WORLDS_RAW%") do (
+  set "W=%%D"
+  set "C=!W:~0,1!"
+  if /I not "!C!"=="_" if /I not "!C!"=="." (
+    >>"%WORLDS_KEEP%" echo %%D
+  )
+)
+if not exist "%WORLDS_KEEP%" (
+  > "worlds.json" echo [
+  >>"worlds.json" echo ]
+  goto :MAIN
+)
+
+sort "%WORLDS_KEEP%" /O "%WORLDS_SORT%" >nul
+
+set "WORLDS_JSON_NEW=%TMP%\worlds.new.json"
+> "%WORLDS_JSON_NEW%" echo [
 set "first=1"
-for /f "delims=" %%D in ('dir /b /ad') do (
+for /f "usebackq delims=" %%D in ("%WORLDS_SORT%") do (
   if defined first (
-    >>"%TMPFILE%" echo   "%%~nD"
+    >>"%WORLDS_JSON_NEW%" echo   "%%~nD"
     set "first="
   ) else (
-    >>"%TMPFILE%" echo   ,"%%~nD"
+    >>"%WORLDS_JSON_NEW%" echo   ,"%%~nD"
   )
 )
->>"%TMPFILE%" echo ]
+>>"%WORLDS_JSON_NEW%" echo ]
+if not exist "worlds.json" (
+  copy /y "%WORLDS_JSON_NEW%" "worlds.json" >nul
+) else (
+  fc /b "%WORLDS_JSON_NEW%" "worlds.json" >nul
+  if errorlevel 1 copy /y "%WORLDS_JSON_NEW%" "worlds.json" >nul
+)
 
-call :writeIfChanged "%TMPFILE%" "worlds.json"
+:MAIN
+rem ================ B) each world\index.json =================
+if not exist "%WORLDS_SORT%" goto :CLEANUP
 
-REM ---------------------------------------------------------
-REM 2) Generate index.json for each world
-REM ---------------------------------------------------------
-for /f "delims=" %%D in ('dir /b /ad') do (
-  set "W=%%D"
-  set "IDX=%TEMP%\index_%%D.tmp"
-  > "!IDX!" echo [
-  set "firstFile=1"
-  for /f "delims=" %%F in ('dir /b /a-d "%%D\*.json" 2^>nul ^| findstr /i /v "^index\.json$"') do (
-    if defined firstFile (
-      >>"!IDX!" echo   "%%F"
-      set "firstFile="
+for /f "usebackq delims=" %%D in ("%WORLDS_SORT%") do (
+  call :BuildIndex "%%D"
+)
+goto :CLEANUP
+
+
+:BuildIndex
+setlocal EnableDelayedExpansion
+set "WORLD=%~1"
+
+set "LIST_SORTED=%TMP%\!WORLD!.sorted.list"
+del /f /q "!LIST_SORTED!" >nul 2>&1
+
+rem PowerShell does ONLY the sorting; it outputs just the names
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$w = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath('%CD%\\%WORLD%');" ^
+  "if (Test-Path -LiteralPath $w) {" ^
+  "  Get-ChildItem -LiteralPath $w -File -Filter '*.json' |" ^
+  "    Where-Object { $_.Name -ne 'index.json' } |" ^
+  "    Sort-Object @{ Expression = { $t = ($_.BaseName -split '-',2)[0]; $n = 0; if ([int]::TryParse($t,[ref]$n)) { $n } else { [int]::MaxValue } } }, Name |" ^
+  "    Select-Object -ExpandProperty Name" ^
+  "} " > "!LIST_SORTED!" 2>nul
+
+set "IDX_NEW=%TMP%\!WORLD!.index.new.json"
+> "!IDX_NEW!" echo [
+set "FST=1"
+if exist "!LIST_SORTED!" (
+  for /f "usebackq delims=" %%F in ("!LIST_SORTED!") do (
+    if defined FST (
+      >>"!IDX_NEW!" echo   "%%F"
+      set "FST="
     ) else (
-      >>"!IDX!" echo   ,"%%F"
+      >>"!IDX_NEW!" echo   ,"%%F"
     )
   )
-  >>"!IDX!" echo ]
-  call :writeIfChanged "!IDX!" "%%D\index.json"
 )
+>>"!IDX_NEW!" echo ]
 
-echo.
-if defined UPDATED (
-  echo Updated files:
-  for %%X in (!UPDATED!) do echo  - %%~X
+if not exist "!WORLD!\index.json" (
+  copy /y "!IDX_NEW!" "!WORLD!\index.json" >nul
 ) else (
-  echo Everything up to date.
+  fc /b "!IDX_NEW!" "!WORLD!\index.json" >nul
+  if errorlevel 1 copy /y "!IDX_NEW!" "!WORLD!\index.json" >nul
 )
 
-popd >nul
-exit /b
+endlocal & goto :eof
 
 
-REM ---------------------------------------------------------
-REM Function: writeIfChanged [tempfile] [target]
-REM ---------------------------------------------------------
-:writeIfChanged
-setlocal
-set "TMP=%~1"
-set "DEST=%~2"
-if not exist "%DEST%" (
-  copy /y "%TMP%" "%DEST%" >nul
-  endlocal & set "UPDATED=!UPDATED! %DEST!" & exit /b
-)
-fc /b "%TMP%" "%DEST%" >nul
-if errorlevel 1 (
-  copy /y "%TMP%" "%DEST%" >nul
-  endlocal & set "UPDATED=!UPDATED! %DEST!" & exit /b
-)
+:CLEANUP
+rd /s /q "%TMP%" >nul 2>&1
+popd >nul 2>&1
 endlocal
-exit /b
