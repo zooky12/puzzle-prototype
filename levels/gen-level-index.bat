@@ -2,6 +2,8 @@
 setlocal EnableExtensions EnableDelayedExpansion
 pushd "%~dp0" >nul 2>&1
 
+set "UPDATED="
+
 rem ---- temp workspace
 set "TMP=%TEMP%\gen_levels_%RANDOM%%RANDOM%"
 md "%TMP%" >nul 2>&1
@@ -17,6 +19,7 @@ dir /b /ad > "%WORLDS_RAW%" 2>nul
 if not exist "%WORLDS_RAW%" (
   > "worlds.json" echo [
   >>"worlds.json" echo ]
+  set "UPDATED=%UPDATED% worlds.json"
   goto :MAIN
 )
 
@@ -30,6 +33,7 @@ for /f "usebackq delims=" %%D in ("%WORLDS_RAW%") do (
 if not exist "%WORLDS_KEEP%" (
   > "worlds.json" echo [
   >>"worlds.json" echo ]
+  set "UPDATED=%UPDATED% worlds.json"
   goto :MAIN
 )
 
@@ -49,19 +53,23 @@ for /f "usebackq delims=" %%D in ("%WORLDS_SORT%") do (
 >>"%WORLDS_JSON_NEW%" echo ]
 if not exist "worlds.json" (
   copy /y "%WORLDS_JSON_NEW%" "worlds.json" >nul
+  set "UPDATED=%UPDATED% worlds.json"
 ) else (
   fc /b "%WORLDS_JSON_NEW%" "worlds.json" >nul
-  if errorlevel 1 copy /y "%WORLDS_JSON_NEW%" "worlds.json" >nul
+  if errorlevel 1 (
+    copy /y "%WORLDS_JSON_NEW%" "worlds.json" >nul
+    set "UPDATED=%UPDATED% worlds.json"
+  )
 )
 
 :MAIN
 rem ================ B) each world\index.json =================
-if not exist "%WORLDS_SORT%" goto :CLEANUP
+if not exist "%WORLDS_SORT%" goto :SUMMARY
 
 for /f "usebackq delims=" %%D in ("%WORLDS_SORT%") do (
   call :BuildIndex "%%D"
 )
-goto :CLEANUP
+goto :SUMMARY
 
 
 :BuildIndex
@@ -71,7 +79,6 @@ set "WORLD=%~1"
 set "LIST_SORTED=%TMP%\!WORLD!.sorted.list"
 del /f /q "!LIST_SORTED!" >nul 2>&1
 
-rem PowerShell does ONLY the sorting; it outputs just the names
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$w = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath('%CD%\\%WORLD%');" ^
   "if (Test-Path -LiteralPath $w) {" ^
@@ -98,15 +105,26 @@ if exist "!LIST_SORTED!" (
 
 if not exist "!WORLD!\index.json" (
   copy /y "!IDX_NEW!" "!WORLD!\index.json" >nul
+  endlocal & set "UPDATED=%UPDATED% %WORLD%\index.json" & goto :eof
 ) else (
   fc /b "!IDX_NEW!" "!WORLD!\index.json" >nul
-  if errorlevel 1 copy /y "!IDX_NEW!" "!WORLD!\index.json" >nul
+  if errorlevel 1 (
+    copy /y "!IDX_NEW!" "!WORLD!\index.json" >nul
+    endlocal & set "UPDATED=%UPDATED% %WORLD%\index.json" & goto :eof
+  )
 )
 
-endlocal & goto :eof
+endlocal
+goto :eof
 
 
-:CLEANUP
+:SUMMARY
+if defined UPDATED (
+  echo Updated: %UPDATED%
+) else (
+  echo Everything up to date.
+)
+
 rd /s /q "%TMP%" >nul 2>&1
 popd >nul 2>&1
 endlocal
